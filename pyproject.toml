@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ioc-quad"
+version = "0.1.0"
+description = "Multi-objective quadratic optimization and inverse optimal control"
+readme = "README.md"
+authors = [
+    {name = "Filip Becanovic", email = "becaphilippe@gmail.com"}
+]
+license = {text = "MIT"}
+requires-python = ">=3.9"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
+keywords = ["optimization", "multi-objective", "inverse-optimal-control", "quadratic-programming"]
+dependencies = [
+    "numpy>=2.0.0",
+    "casadi>=3.6.0",
+    "matplotlib>=3.8.0",
+    "alphashape>=1.3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=22.0.0",
+    "flake8>=4.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/ioc-quad"
+Repository = "https://github.com/yourusername/ioc-quad"
+Documentation = "https://github.com/yourusername/ioc-quad#readme"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ioc_quad*"]
+exclude = ["examples*", "tests*"]
+
+[tool.black]
+line-length = 100
+target-version = ['py39']
