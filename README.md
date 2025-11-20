@@ -7,7 +7,7 @@ A Python library for solving multi-objective quadratic optimization problems and
 ### From source
 
 ```bash
-git clone https://github.com/Beca-Filip/ioc-quad.git
+git clone https://github.com/Beca-Filip/ioc_quad.git
 cd ioc-quad
 pip install -e .
 ```
