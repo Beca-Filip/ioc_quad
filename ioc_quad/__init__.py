@@ -8,20 +8,41 @@ from .core import (
     MultiObjectiveOptimizer,
     InverseOptimalControl,
     QuadraticObjective,
+)
+
+from .math_utils import (
     simplex_grid,
+    simplex_grid_rec,
+    matrix_sqrt,
+    random_psd,
+    random_shell,
+    random_quadfun,
+    fact,
+    choose,
+)
+
+from .plot_utils import (
     plot_ellipse,
-    sample_random_quadratics,
-    sample_positive_definite,
+    plot_ellipsoid,
 )
 
 __version__ = "0.1.0"
 
 __all__ = [
+    # Core classes
     "MultiObjectiveOptimizer",
     "InverseOptimalControl",
     "QuadraticObjective",
+    # Math utilities
     "simplex_grid",
+    "simplex_grid_rec",
+    "matrix_sqrt",
+    "random_psd",
+    "random_shell",
+    "random_quadfun",
+    "fact",
+    "choose",
+    # Plot utilities
     "plot_ellipse",
-    "sample_random_quadratics",
-    "sample_positive_definite",
+    "plot_ellipsoid",
 ]

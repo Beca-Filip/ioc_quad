@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ioc-quad"
+name = "ioc_quad"
 version = "0.1.0"
 description = "Multi-objective quadratic optimization and inverse optimal control"
 readme = "README.md"
@@ -40,9 +40,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/ioc-quad"
-Repository = "https://github.com/yourusername/ioc-quad"
-Documentation = "https://github.com/yourusername/ioc-quad#readme"
+Homepage = "https://github.com/Beca-Filip/ioc_quad"
+Repository = "https://github.com/Beca-Filip/ioc_quad"
+Documentation = "https://github.com/Beca-Filip/ioc_quad#readme"
 
 [tool.setuptools.packages.find]
 where = ["."]

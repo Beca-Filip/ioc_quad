@@ -6,78 +6,8 @@ import alphashape
 from typing import List, Tuple, Optional, Callable
 from dataclasses import dataclass
 
-
-def simplex_grid(m, r):
-    d = 0
-    j = np.zeros((m, 1))
-    sigma = 0
-    grid = []
-    grid = simplex_grid_rec(d, m, r, j, sigma, grid)
-    return grid
-
-
-def simplex_grid_rec(d, m, r, j, sigma, grid):
-    if d >= m - 1:
-        j[d] = (r-1) - sigma
-        grid.append(j / (r-1))
-        return grid
-
-    for i in range(r - sigma):
-        j[d] = i
-        sigmai = sigma + i
-        grid = simplex_grid_rec(d+1, m, r, j, sigmai, grid)
-    return grid
-
-
-def npmsqrt(M):
-    U, S, Vh = np.linalg.svd(M)
-    sqrtM = U * np.diag(np.sqrt(S)) * Vh
-    return sqrtM
-
-
-def plot_ellipse(M, c, ax=None, numpts=50, **kwargs):
-    t = np.linspace(0, 2*np.pi, numpts).reshape(1, -1)
-    circle = np.vstack((np.cos(t), np.sin(t)))
-    sqrtM = npmsqrt(np.linalg.inv(M))
-    ellipse = c + sqrtM @ circle
-    if ax:
-        ax.plot(ellipse[0, :], ellipse[1, :], **kwargs)
-    plt.plot(ellipse[0, :], ellipse[1, :], **kwargs)
-
-
-def sample_positive_definite(N, sigmarange=[0.5, 2]):
-    ang = np.random.rand(1, N)
-    phi1 = np.vstack((np.cos(ang), np.sin(ang)))
-    phi2 = np.vstack((np.cos(ang+np.pi/2), np.sin(ang+np.pi/2)))
-    sig = np.diff(sigmarange, n=1, axis=0) * np.random.rand(2, N) + sigmarange[0]
-    qlist = []
-    for i in range(N):
-        Phi = np.hstack((phi1[:, [i]], phi2[:, [i]]))
-        Sig = np.diag(sig[:, i])
-        qlist.append(Phi @ Sig @ Phi.T)
-    return qlist
-
-
-def sample_random_quadratics(N, rhorange=[1, 2], sigmarange=[0.5, 1.5]):
-    phi = 2 * np.pi * np.random.rand(1, N)
-    rho = np.diff(rhorange, n=1, axis=0) * np.random.rand(1, N) + rhorange[0]
-    xsol = rho * np.vstack((np.cos(phi), np.sin(phi)))
-    qlist = sample_positive_definite(N, sigmarange=sigmarange)
-    plist = [-qlist[i] @ xsol[:, [i]] for i in range(N)]
-    return qlist, plist
-
-
-def fact(n):
-    if n > 1:
-        return fact(n-1) * n
-    return 1
-
-
-def choose(m, n):
-    if m > n:
-        return fact(m) / (fact(m-n) * fact(n))
-    else:
-        raise ValueError("m must be > n.")
+from .math_utils import simplex_grid, random_quadfun
+from .plot_utils import plot_ellipse, plot_ellipsoid
 
 
 @dataclass
@@ -136,16 +66,16 @@ class MultiObjectiveOptimizer:
         self._cost = None
         self._initialized = False
 
-    def generate_random_objectives(self, rhorange: List[float] = [1, 2],
-                                   sigmarange: List[float] = [0.5, 1.5]) -> None:
+    def generate_random_objectives(self, rho_range: List[float] = [1, 2],
+                                   lambda_range: List[float] = [0.5, 1.5]) -> None:
         """
         Generate random quadratic objectives with known solutions.
 
         Args:
-            rhorange: Range for solution magnitude
-            sigmarange: Range for eigenvalues of Q matrices
+            rho_range: Range for solution magnitude
+            lambda_range: Range for eigenvalues of Q matrices
         """
-        qlist, plist = sample_random_quadratics(self.n_objectives, rhorange, sigmarange)
+        qlist, plist = random_quadfun(self.n_vars, self.n_objectives, rho_range, lambda_range)
         self.set_objectives(qlist, plist)
 
     def set_objectives(self, qlist: List[np.ndarray], plist: List[np.ndarray]) -> None:
@@ -216,15 +146,42 @@ class MultiObjectiveOptimizer:
         except RuntimeError as e:
             raise RuntimeError(f"Solver failed: {e}")
 
-    def compute_pareto_front(self, resolution: int = 4) -> np.ndarray:
+    def evaluate_objectives(self, z: np.ndarray) -> np.ndarray:
         """
-        Compute the Pareto front by solving for a grid of weight vectors.
+        Evaluate all objectives at given point(s) in decision space.
+        Maps z-space → phi-space (cost function vector space).
+
+        Args:
+            z: Decision variables (n_vars x num_points) or (n_vars x 1)
+
+        Returns:
+            Cost function values (n_objectives x num_points)
+        """
+        if not self._initialized:
+            raise RuntimeError("Objectives not set")
+
+        # Handle single point or multiple points
+        if z.ndim == 1:
+            z = z.reshape(-1, 1)
+
+        num_points = z.shape[1]
+        phi = np.zeros((self.n_objectives, num_points))
+
+        for i, obj in enumerate(self.objectives):
+            for j in range(num_points):
+                phi[i, j] = obj.evaluate(z[:, [j]])
+
+        return phi
+
+    def compute_pareto_solutions(self, resolution: int = 4) -> np.ndarray:
+        """
+        Compute Pareto optimal solutions in decision space (z-space).
 
         Args:
             resolution: Grid resolution (higher = more points)
 
         Returns:
-            Array of solutions (n_vars x num_points)
+            Array of solutions in z-space (n_vars x num_points)
         """
         if not self._initialized:
             raise RuntimeError("Objectives not set")
@@ -235,11 +192,42 @@ class MultiObjectiveOptimizer:
         solutions = np.zeros((self.n_vars, num_points))
         z_prev = np.zeros((self.n_vars, 1))
 
+        print(f"Computing pareto solutions for {self.n_vars}-dimensional problem with {self.n_objectives} objective functions and resolution {resolution}. Running {num_points} optimizations...") 
         for i, theta in enumerate(thetagrid):
             solutions[:, [i]] = self.solve(theta, initial_guess=z_prev)
             z_prev = solutions[:, [i]]
+        print(f"Successfully computed pareto solutions from {num_points} optimizations.")
 
         return solutions
+
+    def compute_pareto_front(self, resolution: int = 4) -> np.ndarray:
+        """
+        Compute Pareto front in objective space (phi-space).
+
+        Args:
+            resolution: Grid resolution (higher = more points)
+
+        Returns:
+            Array of objective values in phi-space (n_objectives x num_points)
+        """
+        z_solutions = self.compute_pareto_solutions(resolution)
+        return self.evaluate_objectives(z_solutions)
+
+    def compute_pareto_both_spaces(self, resolution: int = 4) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Compute Pareto set in both decision and objective spaces.
+
+        Args:
+            resolution: Grid resolution (higher = more points)
+
+        Returns:
+            Tuple of (z_solutions, phi_values) where:
+                - z_solutions: Decision space (n_vars x num_points)
+                - phi_values: Objective space (n_objectives x num_points)
+        """
+        z_solutions = self.compute_pareto_solutions(resolution)
+        phi_values = self.evaluate_objectives(z_solutions)
+        return z_solutions, phi_values
 
     def get_objectives_list(self) -> Tuple[List[np.ndarray], List[np.ndarray]]:
         """Return the Q and p lists for plotting/analysis"""
@@ -249,9 +237,9 @@ class MultiObjectiveOptimizer:
 
     def plot_individual_solutions(self,
                                   ax: Optional[plt.Axes] = None,
-                                  plot_ellipses: bool = True,
+                                  plot_levelsets: bool = True,
                                   marker: str = 'ro',
-                                  markersize: int = 25,
+                                  markersize: int = 15,
                                   label: str = 'Individual objectives',
                                   **kwargs) -> np.ndarray:
         """
@@ -259,7 +247,7 @@ class MultiObjectiveOptimizer:
 
         Args:
             ax: Matplotlib axes object (creates new if None)
-            plot_ellipses: Whether to plot objective ellipses
+            plot_levelsets: Whether to plot objective 1-level sets
             marker: Marker style for solutions
             markersize: Size of markers
             label: Label for legend
@@ -271,8 +259,8 @@ class MultiObjectiveOptimizer:
         if not self._initialized:
             raise RuntimeError("Objectives not set")
 
-        if self.n_vars != 2:
-            raise ValueError("Plotting only supported for 2D problems")
+        if self.n_vars != 2 and self.n_vars != 3:
+            raise ValueError("Plotting only supported for 2D and 3D problems")
 
         # Solve for each individual objective
         solutions = np.zeros((self.n_vars, self.n_objectives))
@@ -283,23 +271,36 @@ class MultiObjectiveOptimizer:
 
         # Create axes if not provided
         if ax is None:
-            fig, ax = plt.subplots()
+            if self.n_vars == 2:
+                fig, ax = plt.subplots()
+            if self.n_vars == 3:
+                fig, ax = plt.subplots(subplot_kw={"projection":"3d"})
 
         # Plot solutions
-        ax.plot(solutions[0, :], solutions[1, :], marker,
-                markersize=markersize, label=label)
+        if self.n_vars == 2:
+            ax.plot(solutions[0, :], solutions[1, :], marker,
+                    markersize=markersize, label=label)
+        if self.n_vars == 3:
+            ax.plot(solutions[0, :], solutions[1, :], solutions[2, :], marker,
+                    markersize=markersize, label=label)
 
         # Plot ellipses if requested
-        if plot_ellipses:
+        if plot_levelsets:
             qlist, _ = self.get_objectives_list()
-            ellipse_kwargs = {'color': 'b', 'linewidth': 2}
-            ellipse_kwargs.update(kwargs)
+            ellipse_kwargs = {'color': 'b'}
             for i in range(len(qlist)):
-                plot_ellipse(qlist[i], solutions[:, [i]], ax, **ellipse_kwargs)
+                if self.n_vars == 2:
+                    ellipse_kwargs['linewidth'] = 2
+                    ellipse_kwargs.update(kwargs)
+                    plot_ellipse(qlist[i], solutions[:, [i]], ax, **ellipse_kwargs)
+                if self.n_vars == 3:
+                    ellipse_kwargs['alpha'] = 0.3
+                    ellipse_kwargs.update(kwargs)
+                    plot_ellipsoid(qlist[i], solutions[:, [i]], ax, **ellipse_kwargs)
 
         return solutions
 
-    def plot_pareto_front(self,
+    def plot_pareto_solutions(self,
                          pareto_solutions: Optional[np.ndarray] = None,
                          resolution: int = 15,
                          alpha: float = 0.5,
@@ -307,16 +308,16 @@ class MultiObjectiveOptimizer:
                          plot_points: bool = True,
                          point_marker: str = 'k.',
                          point_size: int = 12,
-                         point_label: str = 'Pareto front',
+                         point_label: str = 'Pareto solutions',
                          patch_color: str = 'blue',
                          patch_alpha: float = 0.2) -> np.ndarray:
         """
-        Plot Pareto front solutions as an alphashape.
+        Plot Pareto solutions in decision space (z-space) as an alphashape.
 
         Args:
-            pareto_solutions: Precomputed Pareto front (n_vars x num_points).
+            pareto_solutions: Precomputed Pareto solutions (n_vars x num_points).
                             If None, computes using resolution parameter.
-            resolution: Grid resolution for computing Pareto front (ignored if pareto_solutions provided)
+            resolution: Grid resolution for computing Pareto solutions (ignored if pareto_solutions provided)
             alpha: Alpha parameter for alphashape (controls tightness of hull)
             ax: Matplotlib axes object (creates new if None)
             plot_points: Whether to plot the individual points
@@ -327,40 +328,162 @@ class MultiObjectiveOptimizer:
             patch_alpha: Transparency of the alphashape patch
 
         Returns:
-            Array of Pareto front solutions (n_vars x num_points)
+            Array of Pareto solutions in z-space (n_vars x num_points)
+        """
+        if not self._initialized:
+            raise RuntimeError("Objectives not set")
+
+        if self.n_vars != 2 and self.n_vars != 3:
+            raise ValueError("Plotting only supported for 2D and 3D problems")
+
+        # Compute Pareto solutions if not provided
+        if pareto_solutions is None:
+            pareto_solutions = self.compute_pareto_solutions(resolution=resolution)
+
+        # Create axes if not provided
+        if ax is None:
+            if self.n_vars == 2:
+                fig, ax = plt.subplots()
+            if self.n_vars == 3:
+                fig, ax = plt.subplots(subplot_kw={"projection":"3d"})
+
+        # Convert to points array for alphashape (num_points x n_vars)
+        points = pareto_solutions.T
+
+        # Create and plot alphashape
+        # alpha = alphashape.optimizealpha(points=points, max_iterations=1000, lower=0.02, upper=10.)
+        # print(f"\n\nOptimized alpha {alpha}. \n\n")
+        alpha_shape = alphashape.alphashape(points, alpha)
+
+        if self.n_vars == 2:
+            # 2D case: Use Polygon patch
+            coords = np.array(alpha_shape.exterior.coords)
+            ax.add_patch(Polygon(coords, color=patch_color, alpha=patch_alpha))
+
+            # Plot points if requested
+            if plot_points:
+                ax.scatter(points[:, 0], points[:, 1],
+                          marker=point_marker[1] if len(point_marker) > 1 else 'o',
+                          c=point_marker[0] if len(point_marker) > 1 else 'k',
+                          s=point_size,
+                          label=point_label)
+
+        elif self.n_vars == 3:
+            # 3D case: Use Poly3DCollection for surface
+            from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+            # Extract vertices and faces from the 3D mesh
+            vertices = alpha_shape.vertices
+            faces = alpha_shape.faces
+
+            # Create the 3D surface
+            mesh = Poly3DCollection(vertices[faces], alpha=patch_alpha,
+                                   facecolor=patch_color, edgecolor='darkgray',
+                                   linewidths=0.5)
+            ax.add_collection3d(mesh)
+
+            # Plot points if requested
+            if plot_points:
+                ax.scatter(points[:, 0], points[:, 1], points[:, 2],
+                          marker=point_marker[1] if len(point_marker) > 1 else 'o',
+                          c=point_marker[0] if len(point_marker) > 1 else 'k',
+                          s=point_size,
+                          label=point_label)
+
+        return pareto_solutions
+
+    def plot_z_to_phi_mapping(self,
+                              z_grid_resolution: int = 10,
+                              ax_z: Optional[plt.Axes] = None,
+                              ax_phi: Optional[plt.Axes] = None,
+                              show_pareto: bool = True,
+                              pareto_resolution: int = 15,
+                              connection_alpha: float = 0.3,
+                              connection_color: str = 'gray') -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Visualize how a grid in decision space (z-space) maps to objective space (phi-space).
+        Only supports 2D decision space (n_vars=2) and 2D objective space (n_objectives=2).
+
+        Args:
+            z_grid_resolution: Resolution for z-space grid
+            ax_z: Matplotlib axes for z-space plot
+            ax_phi: Matplotlib axes for phi-space plot
+            show_pareto: Whether to highlight Pareto solutions/front
+            pareto_resolution: Resolution for Pareto computation
+            connection_alpha: Transparency for connection lines
+            connection_color: Color for connection lines
+
+        Returns:
+            Tuple of (z_grid, phi_grid) where:
+                - z_grid: Grid points in z-space (n_vars x num_grid_points)
+                - phi_grid: Mapped points in phi-space (n_objectives x num_grid_points)
         """
         if not self._initialized:
             raise RuntimeError("Objectives not set")
 
         if self.n_vars != 2:
-            raise ValueError("Plotting only supported for 2D problems")
+            raise ValueError("z-to-phi mapping visualization only supported for 2D decision space")
 
-        # Compute Pareto front if not provided
-        if pareto_solutions is None:
-            pareto_solutions = self.compute_pareto_front(resolution=resolution)
+        if self.n_objectives != 2:
+            raise ValueError("z-to-phi mapping visualization only supported for 2D objective space")
 
-        # Create axes if not provided
-        if ax is None:
-            fig, ax = plt.subplots()
+        # Create figure if axes not provided
+        if ax_z is None or ax_phi is None:
+            fig, (ax_z, ax_phi) = plt.subplots(1, 2, figsize=(12, 5))
 
-        # Convert to points array for alphashape (num_points x 2)
-        points = pareto_solutions.T
+        # Create grid in z-space
+        if show_pareto:
+            z_pareto = self.compute_pareto_solutions(resolution=pareto_resolution)
+            z_min = np.min(z_pareto, axis=1, keepdims=True)
+            z_max = np.max(z_pareto, axis=1, keepdims=True)
+            margin = 0.2 * (z_max - z_min)
+            z_min -= margin
+            z_max += margin
+        else:
+            # Default grid bounds
+            z_min = np.array([[-3], [-3]])
+            z_max = np.array([[3], [3]])
 
-        # Create and plot alphashape
-        alpha_shape = alphashape.alphashape(points, alpha)
-        coords = np.array(alpha_shape.exterior.coords)
+        z1_vals = np.linspace(z_min[0, 0], z_max[0, 0], z_grid_resolution)
+        z2_vals = np.linspace(z_min[1, 0], z_max[1, 0], z_grid_resolution)
+        Z1, Z2 = np.meshgrid(z1_vals, z2_vals)
 
-        ax.add_patch(Polygon(coords, alpha=patch_alpha))
-        
-        # Plot points if requested
-        if plot_points:
-            ax.scatter(points[:, 0], points[:, 1],
-                      marker=point_marker[1] if len(point_marker) > 1 else 'o',
-                      c=point_marker[0] if len(point_marker) > 1 else 'k',
-                      s=point_size,
-                      label=point_label)
+        # Flatten grid
+        z_grid = np.vstack([Z1.ravel(), Z2.ravel()])
+        num_grid_points = z_grid.shape[1]
 
-        return pareto_solutions
+        # Map to phi-space
+        phi_grid = self.evaluate_objectives(z_grid)
+
+        # Plot z-space grid
+        ax_z.scatter(z_grid[0, :], z_grid[1, :], c='lightblue', s=20, alpha=0.6, label='Grid points')
+        ax_z.set_xlabel('z₁')
+        ax_z.set_ylabel('z₂')
+        ax_z.set_title('Decision Space (z-space)')
+        ax_z.grid(True, alpha=0.3)
+
+        # Plot phi-space mapped points
+        ax_phi.scatter(phi_grid[0, :], phi_grid[1, :], c='lightcoral', s=20, alpha=0.6, label='Mapped points')
+        ax_phi.set_xlabel('φ₁ (cost 1)')
+        ax_phi.set_ylabel('φ₂ (cost 2)')
+        ax_phi.set_title('Objective Space (φ-space)')
+        ax_phi.grid(True, alpha=0.3)
+
+        # Plot Pareto solutions/front if requested
+        if show_pareto:
+            z_pareto, phi_pareto = self.compute_pareto_both_spaces(resolution=pareto_resolution)
+
+            ax_z.plot(z_pareto[0, :], z_pareto[1, :], 'go-', linewidth=2,
+                     markersize=6, label='Pareto solutions', zorder=10)
+            ax_phi.plot(phi_pareto[0, :], phi_pareto[1, :], 'mo-', linewidth=2,
+                       markersize=6, label='Pareto front', zorder=10)
+
+        ax_z.legend()
+        ax_phi.legend()
+        ax_z.set_aspect('equal', adjustable='box')
+        ax_phi.set_aspect('equal', adjustable='box')
+
+        return z_grid, phi_grid
 
 
 class InverseOptimalControl:

@@ -6,31 +6,41 @@ import numpy as np
 import matplotlib.pyplot as plt
 from ioc_quad import MultiObjectiveOptimizer, InverseOptimalControl
 
+np.random.seed(42)
 
 def main():
     """Demonstration of forward and inverse optimal control"""
     n = 2  # Number of decision variables
-    m = 3  # Number of objectives
+    m = 4  # Number of objectives
 
     # Create optimizer and generate random objectives
     optimizer = MultiObjectiveOptimizer(n_vars=n, n_objectives=m)
-    optimizer.generate_random_objectives(rhorange=[1, 2], sigmarange=[0.5, 1.5])
+    optimizer.generate_random_objectives(rho_range=[1, 2], lambda_range=[0.5, 1.5])
 
     # Create figure
-    fig, ax = plt.subplots(figsize=(10, 8))
+    if n == 2:
+        fig, ax = plt.subplots(figsize=(10, 8))
+    if n == 3:
+        fig, ax = plt.subplots(figsize=(10, 8), subplot_kw={"projection":"3d"})
 
     # Plot individual objective solutions with ellipses
-    zcost = optimizer.plot_individual_solutions(ax=ax, plot_ellipses=True)
+    zcost = optimizer.plot_individual_solutions(ax=ax, plot_levelsets=True)
 
     # Plot Pareto front as alphashape
-    zres = optimizer.plot_pareto_front(ax=ax, resolution=15, alpha=0.5)
+    zpareto = optimizer.plot_pareto_solutions(ax=ax, resolution=15, alpha=2)
+
+    # Find pareto centroid and define step-size away from centroid as std
+    centroid_pareto = np.mean(zpareto, axis=1, keepdims=True)
+    step_size = np.std(zpareto, axis=1, keepdims=True)
 
     # Demonstrate IOC with forward loss evaluation
-    reference = zcost[:, [0]]  # Use first objective solution as reference
+    reference = zcost[:, [0]] + (zcost[:, [0]] - centroid_pareto) * step_size # Use first objective solution as reference, moved-away from centroid by std
     ioc = InverseOptimalControl(optimizer, reference_vector=reference, distance_metric='l2')
 
     # Compute loss for a test theta
-    test_theta = np.array([[0.5], [0.3], [0.2]])
+    # test_theta = np.array([[0.5], [0.3], [0.2]])
+    test_theta = np.random.rand(m, 1)
+    test_theta /= np.sum(test_theta)
     loss = ioc.ioc_loss(test_theta)
     print(f"IOC loss for theta={test_theta.T}: {loss:.4f}")
 
@@ -50,7 +60,7 @@ def main():
 
     # Plot reference and recovered solution
     ax.plot(reference[0], reference[1], 'g*', markersize=20, label='Reference')
-    ax.plot(optimal_z[0], optimal_z[1], 'r^', markersize=15, label='Recovered (inverse)')
+    ax.plot(optimal_z[0], optimal_z[1], 'b^', markersize=15, label='Recovered (inverse)')
 
     ax.set_xlabel('z₁')
     ax.set_ylabel('z₂')
