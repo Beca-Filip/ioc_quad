@@ -61,10 +61,7 @@ def plot_ellipsoid(M, c, ax=None, numpts=25, **kwargs):
     ])
 
     # Transform sphere to ellipsoid using sqrt(M^-1)
-    print("-------------------------------------------------------")
-    print(M)
     inv_sqrt_M = matrix_sqrt(np.linalg.inv(M))
-    print(inv_sqrt_M)
     ellipsoid = c + inv_sqrt_M @ sphere
 
     # Reshape back to grid
