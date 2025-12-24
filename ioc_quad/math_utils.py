@@ -102,7 +102,7 @@ def matrix_sqrt(M):
         Matrix square root of M.
     """
     U, S, Vh = np.linalg.svd(M)
-    sqrtM = U * np.diag(np.sqrt(S)) * Vh
+    sqrtM = U @ np.diag(np.sqrt(S)) @ Vh
     return sqrtM
 
 
