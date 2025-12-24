@@ -2,13 +2,14 @@ import numpy as np
 import casadi as ca
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
+from matplotlib.widgets import Slider
 import alphashape
 from typing import List, Tuple, Optional, Callable
 from dataclasses import dataclass
+from shapely.geometry import Polygon as ShapelyPolygon
 
 from .math_utils import simplex_grid, random_quadfun
 from .plot_utils import plot_ellipse, plot_ellipsoid
-
 
 @dataclass
 class QuadraticObjective:
@@ -357,8 +358,19 @@ class MultiObjectiveOptimizer:
 
         if self.n_vars == 2:
             # 2D case: Use Polygon patch
-            coords = np.array(alpha_shape.exterior.coords)
-            ax.add_patch(Polygon(coords, color=patch_color, alpha=patch_alpha))
+            # FIX (old code breaks)
+            def plot_shapely_poly(geom):
+                if hasattr(geom, 'exterior'):
+                    coords = np.array(geom.exterior.coords)
+                    ax.add_patch(Polygon(coords, color=patch_color, alpha=patch_alpha))
+
+            if alpha_shape is not None:
+                if isinstance(alpha_shape, ShapelyPolygon):
+                    plot_shapely_poly(alpha_shape)
+                
+                elif hasattr(alpha_shape, 'geoms'):
+                    for geom in alpha_shape.geoms:
+                        plot_shapely_poly(geom)
 
             # Plot points if requested
             if plot_points:
@@ -570,7 +582,9 @@ class InverseOptimalControl:
     def solve_inverse(self,
                      initial_theta: Optional[np.ndarray] = None,
                      initial_z: Optional[np.ndarray] = None,
-                     solver_opts: Optional[dict] = None) -> Tuple[np.ndarray, np.ndarray, float]:
+                     solver_opts: Optional[dict] = None,
+                     visualize: bool = False,
+                     resolution: int = 15) -> Tuple[np.ndarray, np.ndarray, float]:
         """
         Solve the inverse optimal control problem by simultaneously optimizing for z and theta.
 
@@ -590,6 +604,11 @@ class InverseOptimalControl:
         """
         if not self.optimizer._initialized:
             raise RuntimeError("Optimizer objectives not set")
+        
+        if visualize:
+            print("Computing Pareto landscape for visualization...")
+            pareto_z, pareto_phi = self.optimizer.compute_pareto_both_spaces(resolution)
+            print("Landscape computed.")
 
         # Create new optimization problem
         opti = ca.Opti()
@@ -644,15 +663,170 @@ class InverseOptimalControl:
         if solver_opts:
             default_solver_opts.update(solver_opts)
 
+        recorder = IOCHistoryRecorder(opti, self.optimizer, z, theta)
+        opti.callback(recorder)
+
         opti.solver('ipopt', default_solver_opts)
 
         # Solve
         try:
             sol = opti.solve()
+            recorder(0)
+            if visualize and len(recorder.hist_z) > 0:
+                self.launch_interactive_plot(recorder, pareto_z, pareto_phi)
+
             optimal_theta = np.array(sol.value(theta)).reshape(self.optimizer.n_objectives, 1)
             optimal_z = np.array(sol.value(z)).reshape(self.optimizer.n_vars, 1)
             final_loss = float(sol.value(cost))
 
             return optimal_theta, optimal_z, final_loss
         except RuntimeError as e:
+            if visualize: 
+                plt.show() # Show what happened before crash
             raise RuntimeError(f"Inverse optimization solver failed: {e}")
+    
+    def launch_interactive_plot(self, recorder, pareto_z, pareto_phi):
+        hist_z = np.array(recorder.hist_z)
+        hist_phi = np.array(recorder.hist_phi)
+        hist_th = np.array(recorder.hist_theta)
+        n_iters = len(hist_z)
+        n_obj = self.optimizer.n_objectives
+        ref_z = self.reference_vector.flatten()
+        ref_phi = self.optimizer.evaluate_objectives(ref_z).flatten()
+
+        fig = plt.figure(figsize=(16, 6))
+        plt.subplots_adjust(bottom=0.25)
+        fig.canvas.manager.set_window_title('Solver History (Close to see final result)')
+
+        ax_z = fig.add_subplot(131)
+        ax_z.set_title(f"1. Decision Space")
+        ax_z.plot(pareto_z[0,:], pareto_z[1,:], 'k.', alpha=0.1, label='Pareto Set')
+        ax_z.plot(ref_z[0], ref_z[1], 'g*', markersize=15, label='Ref')
+        line_z, = ax_z.plot([], [], 'r-', alpha=0.5)
+        point_z, = ax_z.plot([], [], 'ro', markersize=8)
+
+        def project_simplex(thetas):
+            sqrt3_2 = np.sqrt(3) / 2
+            x = 0.5 * (thetas[:, 2] - thetas[:, 1])
+            y = sqrt3_2 * thetas[:, 0]
+            return x, y
+        
+        simplex_x, simplex_y = None, None
+        if n_obj == 3:
+            simplex_x, simplex_y = project_simplex(hist_th)
+        
+        use_high_dim = (n_obj > 3)
+        if not use_high_dim:
+            if n_obj == 3:
+                # 3D Objective Plot
+                ax_phi = fig.add_subplot(132, projection='3d')
+                ax_phi.scatter(pareto_phi[0,:], pareto_phi[1,:], pareto_phi[2,:], c='k', alpha=0.05)
+                ax_phi.scatter(ref_phi[0], ref_phi[1], ref_phi[2], c='g', marker='*', s=100)
+                scat_phi = ax_phi.scatter([], [], [], c='r', s=30)
+                ax_phi.set_title("2. Phi Space")
+
+                # 3D Weight Simplex
+                ax_th = fig.add_subplot(133)
+                ax_th.set_title("3. Weights")
+                
+                v_top = [0, np.sqrt(3)/2]
+                v_left = [-0.5, 0]
+                v_right = [0.5, 0]
+ 
+                ax_th.plot([v_top[0], v_left[0]], [v_top[1], v_left[1]], 'k-', lw=1, alpha=0.6)
+                ax_th.plot([v_left[0], v_right[0]], [v_left[1], v_right[1]], 'k-', lw=1, alpha=0.6)
+                ax_th.plot([v_right[0], v_top[0]], [v_right[1], v_top[1]], 'k-', lw=1, alpha=0.6)
+        
+                ax_th.text(v_top[0], v_top[1]+0.05, r'$\theta_1$', ha='center', fontweight='bold')
+                ax_th.text(v_left[0]-0.05, v_left[1], r'$\theta_2$', ha='right', fontweight='bold')
+                ax_th.text(v_right[0]+0.05, v_right[1], r'$\theta_3$', ha='left', fontweight='bold')
+
+                line_th, = ax_th.plot([], [], 'b-', alpha=0.5, lw=2)
+                point_th, = ax_th.plot([], [], 'bo', markersize=8)
+                
+                ax_th.set_xlim(-0.6, 0.6)
+                ax_th.set_ylim(-0.1, 1.0)
+                ax_th.axis('off') 
+
+            else:
+                ax_phi = fig.add_subplot(132)
+                ax_phi.plot(pareto_phi[0,:], pareto_phi[1,:], 'k.', alpha=0.1)
+                ax_phi.plot(ref_phi[0], ref_phi[1], 'g*', markersize=15)
+                line_phi, = ax_phi.plot([], [], 'r-', alpha=0.5)
+                point_phi, = ax_phi.plot([], [], 'ro', markersize=8)
+                ax_phi.set_title("2. Phi Space")
+
+                ax_th = fig.add_subplot(133)
+                ax_th.set_title("3. Weights")
+                ax_th.plot([0,1], [1,0], 'k--')
+                point_th, = ax_th.plot([], [], 'bo', markersize=8)
+
+        else:
+            ax_phi = fig.add_subplot(132); ax_th = fig.add_subplot(133)
+            ax_phi.set_title("2. Phi (Parallel)"); ax_th.set_title("3. Weights")
+            step = max(1, pareto_phi.shape[1] // 100)
+            ax_phi.plot(pareto_phi[:, ::step], color='grey', alpha=0.1)
+            ax_phi.plot(ref_phi, 'g--o', alpha=0.7)
+            line_phi, = ax_phi.plot([], [], 'r-o', linewidth=2)
+            bar_container = ax_th.bar(range(n_obj), np.zeros(n_obj), color='blue')
+            ax_th.set_ylim(0, 1)
+
+        def update(val):
+            i = int(self.slider.val)
+            point_z.set_data([hist_z[i,0]], [hist_z[i,1]])
+            #line_z.set_data(hist_z[:i+1, 0], hist_z[:i+1, 1])
+            
+            if not use_high_dim:
+                if n_obj == 3:
+                    scat_phi._offsets3d = (hist_phi[i:i+1,0], hist_phi[i:i+1,1], hist_phi[i:i+1,2])
+         
+                    point_th.set_data([simplex_x[i]], [simplex_y[i]])
+                    line_th.set_data(simplex_x[:i+1], simplex_y[:i+1])
+                else:
+                    point_phi.set_data([hist_phi[i,0]], [hist_phi[i,1]])
+                    #line_phi.set_data(hist_phi[:i+1, 0], hist_phi[:i+1, 1])
+                    point_th.set_data([hist_th[i,0]], [hist_th[i,1]])
+            else:
+                line_phi.set_data(range(n_obj), hist_phi[i])
+                for rect, h in zip(bar_container, hist_th[i]): rect.set_height(h)
+            
+            fig.canvas.draw_idle()
+
+        ax_slider = plt.axes([0.2, 0.05, 0.6, 0.03])
+        self.slider = Slider(ax_slider, 'Iter', 0, n_iters - 1, valinit=0, valstep=1)
+        self.slider.on_changed(update)
+
+        print("\nInteractive Slider Open.")
+        print("--> Close the slider window to generate the final main plot.\n")
+        
+        plt.show(block=True)
+        
+class IOCHistoryRecorder:
+    """
+    Callback-like class to record optimization history without plotting in real-time.
+    """
+    def __init__(self, opti, optimizer, z_var, theta_var):
+        self.opti = opti
+        self.optimizer = optimizer
+        self.z_var = z_var
+        self.theta_var = theta_var
+        
+        self.hist_z = []
+        self.hist_phi = []
+        self.hist_theta = []
+
+    def __call__(self, i):
+        try:
+            # Snapshot current values
+            z_val = self.opti.debug.value(self.z_var).flatten()
+            theta_val = self.opti.debug.value(self.theta_var).flatten()
+            
+            # Compute objectives for this snapshot
+            phi_val = self.optimizer.evaluate_objectives(z_val).flatten()
+            
+            self.hist_z.append(z_val)
+            self.hist_theta.append(theta_val)
+            self.hist_phi.append(phi_val)
+
+        except Exception:
+            pass
