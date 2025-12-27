@@ -10,8 +10,8 @@ np.random.seed(42)
 
 def main():
     """Demonstration of forward and inverse optimal control"""
-    n = 2  # Number of decision variables
-    m = 3  # Number of objectives
+    n = 3  # Number of decision variables
+    m = 4  # Number of objectives
 
     # Create optimizer and generate random objectives
     optimizer = MultiObjectiveOptimizer(n_vars=n, n_objectives=m)

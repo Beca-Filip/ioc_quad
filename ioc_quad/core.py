@@ -691,6 +691,8 @@ class InverseOptimalControl:
         hist_th = np.array(recorder.hist_theta)
         n_iters = len(hist_z)
         n_obj = self.optimizer.n_objectives
+        n_vars = hist_z.shape[1] 
+
         ref_z = self.reference_vector.flatten()
         ref_phi = self.optimizer.evaluate_objectives(ref_z).flatten()
 
@@ -698,12 +700,23 @@ class InverseOptimalControl:
         plt.subplots_adjust(bottom=0.25)
         fig.canvas.manager.set_window_title('Solver History (Close to see final result)')
 
-        ax_z = fig.add_subplot(131)
-        ax_z.set_title(f"1. Decision Space")
-        ax_z.plot(pareto_z[0,:], pareto_z[1,:], 'k.', alpha=0.1, label='Pareto Set')
-        ax_z.plot(ref_z[0], ref_z[1], 'g*', markersize=15, label='Ref')
-        line_z, = ax_z.plot([], [], 'r-', alpha=0.5)
-        point_z, = ax_z.plot([], [], 'ro', markersize=8)
+        if n_vars == 3:
+            ax_z = fig.add_subplot(131, projection='3d')
+            ax_z.set_title(f"1. Decision Space (3D)")
+            
+            ax_z.scatter(pareto_z[0,:], pareto_z[1,:], pareto_z[2,:], c='k', alpha=0.1, label='Pareto Set')
+            ax_z.scatter(ref_z[0], ref_z[1], ref_z[2], c='g', marker='*', s=100, label='Ref')
+            
+            line_z, = ax_z.plot([], [], [], 'r-', alpha=0.5)
+            point_z, = ax_z.plot([], [], [], 'ro', markersize=8)
+            
+        else:
+            ax_z = fig.add_subplot(131)
+            ax_z.set_title(f"1. Decision Space (2D proj)")
+            ax_z.plot(pareto_z[0,:], pareto_z[1,:], 'k.', alpha=0.1, label='Pareto Set')
+            ax_z.plot(ref_z[0], ref_z[1], 'g*', markersize=15, label='Ref')
+            line_z, = ax_z.plot([], [], 'r-', alpha=0.5)
+            point_z, = ax_z.plot([], [], 'ro', markersize=8)
 
         def project_simplex(thetas):
             sqrt3_2 = np.sqrt(3) / 2
@@ -773,8 +786,16 @@ class InverseOptimalControl:
 
         def update(val):
             i = int(self.slider.val)
-            point_z.set_data([hist_z[i,0]], [hist_z[i,1]])
-            #line_z.set_data(hist_z[:i+1, 0], hist_z[:i+1, 1])
+            
+            if n_vars == 3:
+                point_z.set_data([hist_z[i,0]], [hist_z[i,1]])
+                point_z.set_3d_properties([hist_z[i,2]])
+                
+                # line_z.set_data(hist_z[:i+1, 0], hist_z[:i+1, 1])
+                # line_z.set_3d_properties(hist_z[:i+1, 2])
+            else:
+                point_z.set_data([hist_z[i,0]], [hist_z[i,1]])
+                # line_z.set_data(hist_z[:i+1, 0], hist_z[:i+1, 1])
             
             if not use_high_dim:
                 if n_obj == 3:
