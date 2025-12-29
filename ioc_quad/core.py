@@ -821,7 +821,40 @@ class InverseOptimalControl:
         print("--> Close the slider window to generate the final main plot.\n")
         
         plt.show(block=True)
-        
+
+
+class MaximumEntropyIRL:
+
+    def __init__(self,
+                 optimizer : MultiObjectiveOptimizer = None,
+                 reference_vector : np.ndarray = None):
+        self.optimizer = optimizer
+        self.reference_vector = reference_vector
+        pass
+
+    def ioc_loss(self, theta : np.ndarray, initial_guess : Optional[np.ndarray] = None) -> float:
+        # self.evaluated_solutions
+        # self.evaluated_costs
+
+        z_sol = self.optimizer.solve(theta)
+        phi_sol = self.optimizer.evaluate_objectives(z_sol)
+        curr_cost = theta @ phi_sol 
+        ioc_loss_val = np.exp(-curr_cost) / (np.exp(-curr_cost) + np.sum(np.exp(self.evaluated_costs)))
+        self.evaluated_solution.append(z_sol)
+        self.evaluated_costs.append(curr_cost)
+        return ioc_loss_val
+
+    def solve_inverse(self,
+                     initial_theta: Optional[np.ndarray] = None,
+                     initial_z: Optional[np.ndarray] = None,
+                     solver_opts: Optional[dict] = None,
+                     visualize: bool = False,
+                     resolution: int = 15) -> Tuple[np.ndarray, np.ndarray, float]:
+        pass
+    
+    def launch_interactive_plot(self):
+        pass
+
 class IOCHistoryRecorder:
     """
     Callback-like class to record optimization history without plotting in real-time.
