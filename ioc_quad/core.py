@@ -7,6 +7,7 @@ import alphashape
 from typing import List, Tuple, Optional, Callable
 from dataclasses import dataclass
 from shapely.geometry import Polygon as ShapelyPolygon
+from scipy.optimize import minimize
 
 from .math_utils import simplex_grid, random_quadfun
 from .plot_utils import plot_ellipse, plot_ellipsoid
@@ -39,7 +40,6 @@ class QuadraticObjective:
     def evaluate(self, z: np.ndarray) -> float:
         """Evaluate the objective at point z"""
         return float(0.5 * z.T @ self.Q @ z + self.p.T @ z)
-
 
 class MultiObjectiveOptimizer:
     """
@@ -497,7 +497,6 @@ class MultiObjectiveOptimizer:
 
         return z_grid, phi_grid
 
-
 class InverseOptimalControl:
     """
     Inverse Optimal Control for multi-objective quadratic problems.
@@ -606,9 +605,7 @@ class InverseOptimalControl:
             raise RuntimeError("Optimizer objectives not set")
         
         if visualize:
-            print("Computing Pareto landscape for visualization...")
-            pareto_z, pareto_phi = self.optimizer.compute_pareto_both_spaces(resolution)
-            print("Landscape computed.")
+            Visualizer = IOCVisualizer(self.optimizer, self.reference_vector, resolution)
 
         # Create new optimization problem
         opti = ca.Opti()
@@ -648,7 +645,7 @@ class InverseOptimalControl:
         if initial_theta is None:
             initial_theta = np.ones((self.optimizer.n_objectives, 1)) / self.optimizer.n_objectives
         if initial_z is None:
-            initial_z = self.reference_vector
+            initial_z = self.optimizer.solve(initial_theta)
 
         opti.set_initial(theta, initial_theta)
         opti.set_initial(z, initial_z)
@@ -663,7 +660,7 @@ class InverseOptimalControl:
         if solver_opts:
             default_solver_opts.update(solver_opts)
 
-        recorder = IOCHistoryRecorder(opti, self.optimizer, z, theta)
+        recorder = IOCHistoryRecorder(opti, self.optimizer, theta, z, "IOC")
         opti.callback(recorder)
 
         opti.solver('ipopt', default_solver_opts)
@@ -673,7 +670,7 @@ class InverseOptimalControl:
             sol = opti.solve()
             recorder(0)
             if visualize and len(recorder.hist_z) > 0:
-                self.launch_interactive_plot(recorder, pareto_z, pareto_phi)
+                Visualizer.plot_solver_history(recorder)
 
             optimal_theta = np.array(sol.value(theta)).reshape(self.optimizer.n_objectives, 1)
             optimal_z = np.array(sol.value(z)).reshape(self.optimizer.n_vars, 1)
@@ -684,39 +681,144 @@ class InverseOptimalControl:
             if visualize: 
                 plt.show() # Show what happened before crash
             raise RuntimeError(f"Inverse optimization solver failed: {e}")
-    
-    def launch_interactive_plot(self, recorder, pareto_z, pareto_phi):
+
+class IOCHistoryRecorder:
+    """
+    Callback-like class to record optimization history without plotting in real-time.
+    """
+    def __init__(self, opti, optimizer, theta_var, z_var = None, name = " "):
+        self.opti = opti
+        self.optimizer = optimizer
+        self.z_var = z_var
+        self.theta_var = theta_var
+        self.name = name
+        
+        self.hist_z = []
+        self.hist_phi = []
+        self.hist_theta = []
+
+    def __call__(self, i):
+        try:
+            theta_val = self.opti.debug.value(self.theta_var).flatten()
+
+            if self.z_var is not None:
+                # z CasADi variable
+                z_val = np.array(self.opti.debug.value(self.z_var)).flatten()
+            else:
+                # Use optimizer to solve for z given theta
+                z_val = self.optimizer.solve(theta_val).flatten()
+            
+            phi_val = self.optimizer.evaluate_objectives(z_val).flatten()
+            
+            self.hist_z.append(z_val)
+            self.hist_theta.append(theta_val)
+            self.hist_phi.append(phi_val)
+
+        except Exception:
+            pass
+
+class IOCVisualizer:
+    def __init__(self, 
+                 optimizer: MultiObjectiveOptimizer, 
+                 reference_vector: np.ndarray,
+                 pareto_z: Optional[np.ndarray] = None,
+                 pareto_phi: Optional[np.ndarray] = None,
+                 resolution: int = 15):
+        self.optimizer = optimizer
+        self.ref_z = reference_vector.flatten()
+        self.ref_phi = optimizer.evaluate_objectives(self.ref_z).flatten()
+        if pareto_z is not None and pareto_phi is not None:
+            self.pareto_z = pareto_z
+            self.pareto_phi = pareto_phi
+        else:
+            self.pareto_z, self.pareto_phi = self.optimizer.compute_pareto_both_spaces(resolution)
+
+
+    def _draw_alphashape(self, ax, points, n_vars, alpha=1.5, color='blue', p_alpha=0.15):
+        import alphashape
+        from matplotlib.patches import Polygon as MplPolygon
+        from shapely.geometry import Polygon as ShapelyPolygon
+        
+        pts = points.T if points.shape[0] == n_vars else points
+        shape = alphashape.alphashape(pts, alpha)
+
+        if n_vars == 2:
+            def add_poly(geom):
+                if hasattr(geom, 'exterior'):
+                    coords = np.array(geom.exterior.coords)
+                    ax.add_patch(MplPolygon(coords, color=color, alpha=p_alpha, zorder=1))
+
+            if isinstance(shape, ShapelyPolygon):
+                add_poly(shape)
+            elif hasattr(shape, 'geoms'):
+                for g in shape.geoms: add_poly(g)
+
+        elif n_vars == 3:
+            from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+            try:
+                vertices = shape.vertices
+                faces = shape.faces
+                mesh = Poly3DCollection(vertices[faces], alpha=p_alpha, 
+                                      facecolor=color, edgecolor='none', zorder=1)
+                ax.add_collection3d(mesh)
+            except AttributeError:
+                print("W: Alphashape nije mogao da generiše 3D mesh.")
+
+    def plot_solver_history(self, recorder: IOCHistoryRecorder):
         hist_z = np.array(recorder.hist_z)
         hist_phi = np.array(recorder.hist_phi)
         hist_th = np.array(recorder.hist_theta)
+
+        evaluated_solutions = None
+        evaluated_costs = None
+        if hasattr(recorder, "evaluated_solutions"):
+            vals = getattr(recorder, "evaluated_solutions")
+            if vals is not None:
+                evaluated_solutions = np.array(vals)
+        if hasattr(recorder, "evaluated_costs"):
+            vals = getattr(recorder, "evaluated_costs")
+            if vals is not None:
+                evaluated_costs = np.array(vals)
+                
         n_iters = len(hist_z)
         n_obj = self.optimizer.n_objectives
         n_vars = hist_z.shape[1] 
 
-        ref_z = self.reference_vector.flatten()
-        ref_phi = self.optimizer.evaluate_objectives(ref_z).flatten()
-
         fig = plt.figure(figsize=(16, 6))
         plt.subplots_adjust(bottom=0.25)
-        fig.canvas.manager.set_window_title('Solver History (Close to see final result)')
+        fig.canvas.manager.set_window_title(f'Solver History {recorder.name}')
 
         if n_vars == 3:
             ax_z = fig.add_subplot(131, projection='3d')
-            ax_z.set_title(f"1. Decision Space (3D)")
+            ax_z.set_title("1. Decision Space (z)", fontweight='bold')
             
-            ax_z.scatter(pareto_z[0,:], pareto_z[1,:], pareto_z[2,:], c='k', alpha=0.1, label='Pareto Set')
-            ax_z.scatter(ref_z[0], ref_z[1], ref_z[2], c='g', marker='*', s=100, label='Ref')
+            ax_z.scatter(self.pareto_z[0,:], self.pareto_z[1,:], self.pareto_z[2,:], c='k', alpha=0.1, label='Pareto Set')
+            ax_z.scatter(self.ref_z[0], self.ref_z[1], self.ref_z[2], c='g', marker='*', s=100, label='Ref')
             
             line_z, = ax_z.plot([], [], [], 'r-', alpha=0.5)
-            point_z, = ax_z.plot([], [], [], 'ro', markersize=8)
+            point_z, = ax_z.plot([], [], [], 'ro', markersize=8, label='Current Solution')
+            
+            ax_z.set_xlabel('$z_1$'); ax_z.set_ylabel('$z_2$'); ax_z.set_zlabel('$z_3$')
+
+            if evaluated_solutions is not None:
+                ax_z.scatter(evaluated_solutions[:,0], evaluated_solutions[:,1], evaluated_solutions[:,2],
+                              c='blue', marker='x', s=50, label='Evaluated Solutions')
             
         else:
             ax_z = fig.add_subplot(131)
-            ax_z.set_title(f"1. Decision Space (2D proj)")
-            ax_z.plot(pareto_z[0,:], pareto_z[1,:], 'k.', alpha=0.1, label='Pareto Set')
-            ax_z.plot(ref_z[0], ref_z[1], 'g*', markersize=15, label='Ref')
+            ax_z.set_title("1. Decision Space (z)", fontweight='bold')
+            ax_z.plot(self.pareto_z[0,:], self.pareto_z[1,:], 'k.', alpha=0.1, label='Pareto Set')
+            ax_z.plot(self.ref_z[0], self.ref_z[1], 'g*', markersize=15, label='Ref')
             line_z, = ax_z.plot([], [], 'r-', alpha=0.5)
-            point_z, = ax_z.plot([], [], 'ro', markersize=8)
+            point_z, = ax_z.plot([], [], 'ro', markersize=8, label='Current Solution')
+            ax_z.set_xlabel('$z_1$'); ax_z.set_ylabel('$z_2$')
+            ax_z.grid(True, alpha=0.3)
+            if evaluated_solutions is not None:
+                ax_z.scatter(evaluated_solutions[:,0], evaluated_solutions[:,1],
+                              c='blue', marker='x', s=50, label='Evaluated Solutions')
+    
+        self._draw_alphashape(ax_z, self.pareto_z, n_vars)
+        ax_z.legend(loc='upper left', fontsize='small')
 
         def project_simplex(thetas):
             sqrt3_2 = np.sqrt(3) / 2
@@ -733,14 +835,17 @@ class InverseOptimalControl:
             if n_obj == 3:
                 # 3D Objective Plot
                 ax_phi = fig.add_subplot(132, projection='3d')
-                ax_phi.scatter(pareto_phi[0,:], pareto_phi[1,:], pareto_phi[2,:], c='k', alpha=0.05)
-                ax_phi.scatter(ref_phi[0], ref_phi[1], ref_phi[2], c='g', marker='*', s=100)
-                scat_phi = ax_phi.scatter([], [], [], c='r', s=30)
-                ax_phi.set_title("2. Phi Space")
+                ax_phi.scatter(self.pareto_phi[0,:], self.pareto_phi[1,:], self.pareto_phi[2,:], c='k', alpha=0.05, label='Pareto Front')
+                ax_phi.scatter(self.ref_phi[0], self.ref_phi[1], self.ref_phi[2], c='g', marker='*', s=100, label='Ref')
+                scat_phi = ax_phi.scatter([], [], [], c='r', s=30, label='Current Solution')
+
+                ax_phi.set_title("2. Phi Space ($\\phi$)", fontweight='bold')
+                ax_phi.set_xlabel('$\\phi_1$'); ax_phi.set_ylabel('$\\phi_2$'); ax_phi.set_zlabel('$\\phi_3$')
+                ax_phi.legend(loc='upper left', fontsize='small')
 
                 # 3D Weight Simplex
                 ax_th = fig.add_subplot(133)
-                ax_th.set_title("3. Weights")
+                ax_th.set_title("3. Weights ($\\theta$)", fontweight='bold')
                 
                 v_top = [0, np.sqrt(3)/2]
                 v_left = [-0.5, 0]
@@ -750,39 +855,54 @@ class InverseOptimalControl:
                 ax_th.plot([v_left[0], v_right[0]], [v_left[1], v_right[1]], 'k-', lw=1, alpha=0.6)
                 ax_th.plot([v_right[0], v_top[0]], [v_right[1], v_top[1]], 'k-', lw=1, alpha=0.6)
         
-                ax_th.text(v_top[0], v_top[1]+0.05, r'$\theta_1$', ha='center', fontweight='bold')
-                ax_th.text(v_left[0]-0.05, v_left[1], r'$\theta_2$', ha='right', fontweight='bold')
-                ax_th.text(v_right[0]+0.05, v_right[1], r'$\theta_3$', ha='left', fontweight='bold')
+                ax_th.text(v_top[0], v_top[1]+0.05, '$\\theta_1$', ha='center', fontweight='bold')
+                ax_th.text(v_left[0]-0.05, v_left[1], '$\\theta_2$', ha='right', fontweight='bold')
+                ax_th.text(v_right[0]+0.05, v_right[1], '$\\theta_3$', ha='left', fontweight='bold')
 
-                line_th, = ax_th.plot([], [], 'b-', alpha=0.5, lw=2)
-                point_th, = ax_th.plot([], [], 'bo', markersize=8)
+                line_th, = ax_th.plot([], [], 'b-', alpha=0.5, lw=2, label='Weight Path')
+                point_th, = ax_th.plot([], [], 'bo', markersize=8, label='Current Solution')
                 
                 ax_th.set_xlim(-0.6, 0.6)
                 ax_th.set_ylim(-0.1, 1.0)
                 ax_th.axis('off') 
+                ax_th.legend(loc='upper right', fontsize='small')
 
             else:
                 ax_phi = fig.add_subplot(132)
-                ax_phi.plot(pareto_phi[0,:], pareto_phi[1,:], 'k.', alpha=0.1)
-                ax_phi.plot(ref_phi[0], ref_phi[1], 'g*', markersize=15)
+                ax_phi.plot(self.pareto_phi[0,:], self.pareto_phi[1,:], 'k.', alpha=0.1, label='Pareto Front')
+                ax_phi.plot(self.ref_phi[0], self.ref_phi[1], 'g*', markersize=15, label='Ref')
                 line_phi, = ax_phi.plot([], [], 'r-', alpha=0.5)
-                point_phi, = ax_phi.plot([], [], 'ro', markersize=8)
-                ax_phi.set_title("2. Phi Space")
+                point_phi, = ax_phi.plot([], [], 'ro', markersize=8, label='Current Solution')
+                ax_phi.set_title("2. Phi Space ($\\phi$)", fontweight='bold')
+                ax_phi.set_xlabel("$\\phi_1$"); ax_phi.set_ylabel("$\\phi_2$")
+                ax_phi.grid(True, alpha=0.3)
+                ax_phi.legend(loc='upper left', fontsize='small')
 
                 ax_th = fig.add_subplot(133)
-                ax_th.set_title("3. Weights")
+                ax_th.set_title("3. Weights ($\\theta$)", fontweight='bold')
                 ax_th.plot([0,1], [1,0], 'k--')
-                point_th, = ax_th.plot([], [], 'bo', markersize=8)
+                point_th, = ax_th.plot([], [], 'bo', markersize=8, label='Current Solution')
+                ax_th.legend(loc='upper right', fontsize='small')
 
         else:
             ax_phi = fig.add_subplot(132); ax_th = fig.add_subplot(133)
-            ax_phi.set_title("2. Phi (Parallel)"); ax_th.set_title("3. Weights")
-            step = max(1, pareto_phi.shape[1] // 100)
-            ax_phi.plot(pareto_phi[:, ::step], color='grey', alpha=0.1)
-            ax_phi.plot(ref_phi, 'g--o', alpha=0.7)
-            line_phi, = ax_phi.plot([], [], 'r-o', linewidth=2)
-            bar_container = ax_th.bar(range(n_obj), np.zeros(n_obj), color='blue')
+            ax_phi.set_title("2. Phi Space ($\\phi$)", fontweight='bold'); 
+            ax_th.set_title("3. Weights ($\\theta$)", fontweight='bold')
+            step = max(1, self.pareto_phi.shape[1] // 100)
+            ax_phi.plot(self.pareto_phi[:, ::step], color='grey', alpha=0.1)
+            ax_phi.plot(self.pareto_phi[:, :1:step], 'grey', alpha=0.4, label='Pareto Front')
+            ax_phi.xaxis.set_ticks(range(n_obj))
+            ax_phi.set_xticklabels([f'$\\phi_{i+1}$' for i in range(n_obj)])
+
+            ax_phi.plot(self.ref_phi, 'g--o', alpha=0.7, label='Ref')
+            line_phi, = ax_phi.plot([], [], 'r-o', linewidth=2, markersize=6, label='Current Solution')
+            bar_container_labels = [f'$\\theta_{i+1}$' for i in range(n_obj)]
+            bar_container = ax_th.bar(bar_container_labels, np.zeros(n_obj), color='blue')
             ax_th.set_ylim(0, 1)
+            ax_phi.set_ylabel('Cost Values'); ax_th.set_ylabel('Weight Values')
+            ax_phi.grid(True, alpha=0.3)
+            ax_phi.legend(loc='upper left', fontsize='small')
+
 
         def update(val):
             i = int(self.slider.val)
@@ -822,65 +942,278 @@ class InverseOptimalControl:
         
         plt.show(block=True)
 
-
-class MaximumEntropyIRL:
-
+class MaximumEntropyIRL_withoutParetoSamples:
+    """Maximum Entropy Inverse Reinforcement Learning without pre-computed Pareto samples"""
     def __init__(self,
                  optimizer : MultiObjectiveOptimizer = None,
-                 reference_vector : np.ndarray = None):
+                 reference_vector : np.ndarray = None, 
+                 initial_theta: Optional[np.ndarray] = None, 
+                 resolution: int = 20):
+        
         self.optimizer = optimizer
         self.reference_vector = reference_vector
-        pass
+        if initial_theta is None:
+            n_obj = self.optimizer.n_objectives
+            initial_theta = np.ones(n_obj) / n_obj
+        else:
+            self.initial_theta = initial_theta
+        
+        self.initial_z = self.optimizer.solve(initial_theta.reshape(-1, 1))
+        self.initial_phi = self.optimizer.evaluate_objectives(self.initial_z).flatten()
 
-    def ioc_loss(self, theta : np.ndarray, initial_guess : Optional[np.ndarray] = None) -> float:
-        # self.evaluated_solutions
-        # self.evaluated_costs
+        if reference_vector is not None:
+            self.phi_ref = self.optimizer.evaluate_objectives(reference_vector).flatten()
+            
+            self.evaluated_solutions = [self.initial_z.flatten(), reference_vector.flatten()]
+            self.evaluated_costs = [self.initial_phi, self.phi_ref]
+        else:
+            print("Warning: No reference vector provided for IOC.")
 
-        z_sol = self.optimizer.solve(theta)
-        phi_sol = self.optimizer.evaluate_objectives(z_sol)
-        curr_cost = theta @ phi_sol 
-        ioc_loss_val = np.exp(-curr_cost) / (np.exp(-curr_cost) + np.sum(np.exp(self.evaluated_costs)))
-        self.evaluated_solution.append(z_sol)
-        self.evaluated_costs.append(curr_cost)
-        return ioc_loss_val
+        
+    def ioc_loss(self, theta : np.ndarray, recorder: Optional[object] = None) -> float:
+        phi_samples = np.array(self.evaluated_costs).T 
+        weighted_costs = ca.mtimes(theta.T, phi_samples)
+        neg_costs = -weighted_costs
+        max_val = ca.mmax(neg_costs)
+        log_Z = max_val + ca.log(ca.sum2(ca.exp(neg_costs - max_val)))
+        loss = ca.mtimes(theta.T, self.phi_ref.reshape(-1, 1)) + log_Z
 
     def solve_inverse(self,
                      initial_theta: Optional[np.ndarray] = None,
-                     initial_z: Optional[np.ndarray] = None,
-                     solver_opts: Optional[dict] = None,
                      visualize: bool = False,
-                     resolution: int = 15) -> Tuple[np.ndarray, np.ndarray, float]:
-        pass
-    
-    def launch_interactive_plot(self):
-        pass
-
-class IOCHistoryRecorder:
-    """
-    Callback-like class to record optimization history without plotting in real-time.
-    """
-    def __init__(self, opti, optimizer, z_var, theta_var):
-        self.opti = opti
-        self.optimizer = optimizer
-        self.z_var = z_var
-        self.theta_var = theta_var
+                     solver_opts: Optional[dict] = None,
+                     max_iterations: int = 20) -> Tuple[np.ndarray, np.ndarray, list]:
         
-        self.hist_z = []
-        self.hist_phi = []
-        self.hist_theta = []
+        n_obj = self.optimizer.n_objectives
+        if initial_theta is None:
+            initial_theta = np.ones(n_obj) / n_obj
+        current_theta = initial_theta.copy()
+        
+        class History:
+            def __init__(self):
+                self.hist_z, self.hist_phi, self.hist_theta, self.loss_history = [], [], [], []
+                self.name = "MaxEnt_Scipy_noParetoSamples"
+                self.evaluated_solutions = []
+                self.evaluated_costs = []
+        recorder = History()
+        recorder.hist_z.append(self.initial_z.flatten())
+        recorder.hist_phi.append(self.initial_phi)
+        recorder.hist_theta.append(current_theta.flatten())
 
-    def __call__(self, i):
+        for i in range(max_iterations):
+
+            opti = ca.Opti()
+            theta = opti.variable(self.optimizer.n_objectives, 1)
+            phi_samples = np.array(self.evaluated_costs).T 
+            weighted_costs = ca.mtimes(theta.T, phi_samples)
+            neg_costs = -weighted_costs
+            max_val = ca.mmax(neg_costs)
+            log_Z = max_val + ca.log(ca.sum2(ca.exp(neg_costs - max_val)))
+            loss = ca.mtimes(theta.T, self.phi_ref.reshape(-1, 1)) + log_Z
+            
+            opti.minimize(loss)
+            opti.subject_to(ca.sum1(theta) == 1.0)
+            opti.subject_to(theta >= 1e-4)
+            
+            opti.set_initial(theta, current_theta.reshape(-1, 1))
+            opti.solver('ipopt', {'ipopt.print_level': 0, 'print_time': 0})
+            current_theta = opti.solve().value(theta).flatten()
+
+            z_new = self.optimizer.solve(current_theta.reshape(-1, 1))
+            phi_new = self.optimizer.evaluate_objectives(z_new).flatten()
+
+            self.evaluated_costs.append(phi_new)
+            self.evaluated_solutions.append(z_new.flatten())
+
+            recorder.hist_z.append(z_new.flatten())
+            recorder.hist_theta.append(current_theta.flatten())
+            recorder.hist_phi.append(phi_new)
+
+            if i > 0:
+                diff = np.linalg.norm(z_new.flatten() - recorder.hist_z[-2])
+                if diff < 1e-4:
+                    print(f"Converged at iteration {i}")
+                    break
+            
+            print(f"Iteration {i}: Loss calculated over {len(self.evaluated_costs)-1} samples.")
+
+
+        if visualize:
+            viz = IOCVisualizer(self.optimizer, self.reference_vector)
+            recorder.evaluated_solutions = np.array(self.evaluated_solutions)
+            recorder.evaluated_costs = np.array(self.evaluated_costs)
+            viz.plot_solver_history(recorder)
+
+        return current_theta, z_new
+
+class MaximumEntropyIRL_ParetoSamples_Casadi:
+    """Maximum Entropy Inverse Reinforcement Learning using pre-computed Pareto samples, using a Casadi optimizer"""
+    def __init__(self,
+                 optimizer : MultiObjectiveOptimizer = None,
+                 reference_vector : np.ndarray = None,
+                 resolution: int = 20):
+        
+        self.optimizer = optimizer
+        self.reference_vector = reference_vector
+        
+        if reference_vector is not None:
+            self.phi_ref = self.optimizer.evaluate_objectives(reference_vector).flatten()
+
+        print(f"Pre-computing {resolution} resolution Pareto samples for MaxEnt base...")
+        self.pareto_z, self.pareto_phi = self.optimizer.compute_pareto_both_spaces(resolution)
+
+    def ioc_loss(self, theta : np.ndarray, recorder: Optional[object] = None) -> float:
+        theta = theta.flatten()
+        sample_costs = self.pareto_phi.T @ theta
+        
+        max_val = np.max(-sample_costs)
+        log_Z = max_val + np.log(np.sum(np.exp(-sample_costs - max_val)))
+        
+        cost_expert = np.dot(self.phi_ref, theta)
+        loss = cost_expert + log_Z
+
+        if recorder is not None:
+            z_curr = self.optimizer.solve(theta.reshape(-1, 1))
+            phi_curr = self.optimizer.evaluate_objectives(z_curr).flatten()
+            recorder.hist_z.append(z_curr.flatten())
+            recorder.hist_theta.append(theta.copy())
+            recorder.hist_phi.append(phi_curr)
+            
+        return float(loss)
+
+    def solve_inverse(self,
+                     initial_theta: Optional[np.ndarray] = None,
+                     visualize: bool = False,
+                     solver_opts: Optional[dict] = None,
+                     resolution: int = 15) -> Tuple[np.ndarray, np.ndarray, float]:
+        
+        n_obj = self.optimizer.n_objectives
+        n_samples = self.pareto_phi.shape[1]
+
+        opti = ca.Opti()
+        theta = opti.variable(n_obj, 1)
+
+        phi_ref = self.phi_ref.reshape(n_obj, 1)
+        phi_samples = self.pareto_phi
+
+        weighted_costs = ca.mtimes(theta.T, phi_samples)
+        neg_costs = -weighted_costs
+        
+        max_val = ca.mmax(neg_costs)
+        log_Z = max_val + ca.log(ca.sum2(ca.exp(neg_costs - max_val)))
+        
+        cost_expert = ca.mtimes(theta.T, phi_ref)
+        loss = cost_expert + log_Z
+        
+        opti.minimize(loss)
+
+        opti.subject_to(ca.sum1(theta) == 1.0)
+        opti.subject_to(theta >= 1e-4) 
+
+        recorder = IOCHistoryRecorder(opti, self.optimizer, theta, z_var=None, name="MaxEntCasadi")
+        opti.callback(recorder)
+
+        default_opts = {'ipopt.print_level': 0, 'print_time': 0, 'ipopt.tol': 1e-9}
+        if solver_opts: default_opts.update(solver_opts)
+        opti.solver('ipopt', default_opts)
+
+        if initial_theta is not None:
+            opti.set_initial(theta, initial_theta)
+        else:
+            opti.set_initial(theta, np.ones((n_obj, 1)) / n_obj)
+
         try:
-            # Snapshot current values
-            z_val = self.opti.debug.value(self.z_var).flatten()
-            theta_val = self.opti.debug.value(self.theta_var).flatten()
-            
-            # Compute objectives for this snapshot
-            phi_val = self.optimizer.evaluate_objectives(z_val).flatten()
-            
-            self.hist_z.append(z_val)
-            self.hist_theta.append(theta_val)
-            self.hist_phi.append(phi_val)
+            sol = opti.solve()
+            final_theta = np.array(sol.value(theta)).reshape(-1, 1)
+            print(final_theta)
+            print("MaxEnt Optimization converged successfully.")
+        except RuntimeError:
+            print("MaxEnt Optimization failed to converge, using last debug values.")
+            final_theta = np.array(opti.debug.value(theta)).reshape(-1, 1)
 
-        except Exception:
-            pass
+        final_z = self.optimizer.solve(final_theta)
+
+        if visualize and len(recorder.hist_z)>0:
+            print("Launching Visualizer...")
+            viz = IOCVisualizer(self.optimizer, self.reference_vector)
+            viz.pareto_z = self.pareto_z
+            viz.pareto_phi = self.pareto_phi
+            viz.plot_solver_history(recorder)
+        
+        final_loss = self.ioc_loss(final_theta)
+
+        return final_theta, final_z, final_loss
+    
+class MaximumEntropyIRL_ParetoSamples_Scipy:
+    """Maximum Entropy Inverse Reinforcement Learning using pre-computed Pareto samples, using a Scipy optimizer"""
+    def __init__(self,
+            optimizer : MultiObjectiveOptimizer = None,
+            reference_vector : np.ndarray = None,
+            resolution: int = 20):
+        self.optimizer = optimizer
+        self.reference_vector = reference_vector
+        
+        if reference_vector is not None:
+            self.phi_ref = self.optimizer.evaluate_objectives(reference_vector).flatten()
+
+        print(f"Pre-computing {resolution} resolution Pareto samples for MaxEnt base...")
+        self.pareto_z, self.pareto_phi = self.optimizer.compute_pareto_both_spaces(resolution)
+
+    def ioc_loss(self, theta : np.ndarray, recorder: Optional[object] = None) -> float:
+        theta = theta.flatten()
+        sample_costs = self.pareto_phi.T @ theta
+        
+        max_val = np.max(-sample_costs)
+        log_Z = max_val + np.log(np.sum(np.exp(-sample_costs - max_val)))
+        
+        cost_expert = np.dot(self.phi_ref, theta)
+        loss = cost_expert + log_Z
+
+        if recorder is not None:
+            z_curr = self.optimizer.solve(theta.reshape(-1, 1))
+            phi_curr = self.optimizer.evaluate_objectives(z_curr).flatten()
+            recorder.hist_z.append(z_curr.flatten())
+            recorder.hist_theta.append(theta.copy())
+            recorder.hist_phi.append(phi_curr)
+            
+        return float(loss)
+              
+    def solve_inverse(self,
+                    initial_theta: Optional[np.ndarray] = None,
+                    visualize: bool = False,
+                    solver_opts: Optional[dict] = None,
+                    resolution: int = 15) -> Tuple[np.ndarray, np.ndarray, list]:
+        
+        n_obj = self.optimizer.n_objectives
+        if initial_theta is None:
+            initial_theta = np.ones(n_obj) / n_obj
+
+        class History:
+            def __init__(self):
+                self.hist_z, self.hist_phi, self.hist_theta, self.loss_history = [], [], [], []
+                self.name = "MaxEntScipy"
+        recorder = History()
+
+        cons = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
+        bounds = [(0.0, 1.0) for _ in range(n_obj)]
+
+        res = minimize(
+            self.ioc_loss,
+            initial_theta,
+            args=(recorder,),
+            method='SLSQP',
+            bounds=bounds,
+            constraints=cons,
+            options={'maxiter': 100, 'ftol': 1e-9, 'disp': True}
+        )
+
+        opt_theta = res.x.reshape(-1, 1)
+        opt_z = self.optimizer.solve(opt_theta)
+
+        if visualize:
+            viz = IOCVisualizer(self.optimizer, self.reference_vector)
+            viz.pareto_z = self.pareto_z
+            viz.pareto_phi = self.pareto_phi
+            viz.plot_solver_history(recorder)
+
+        return opt_theta, opt_z, recorder.loss_history

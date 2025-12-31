@@ -4,7 +4,11 @@ Basic example demonstrating the multi-objective optimizer and inverse optimal co
 
 import numpy as np
 import matplotlib.pyplot as plt
-from ioc_quad import MultiObjectiveOptimizer, InverseOptimalControl
+from ioc_quad import (MultiObjectiveOptimizer, 
+                     InverseOptimalControl, 
+                     MaximumEntropyIRL_ParetoSamples_Casadi,
+                     MaximumEntropyIRL_ParetoSamples_Scipy, 
+                     MaximumEntropyIRL_withoutParetoSamples)
 
 np.random.seed(42)
 
@@ -27,7 +31,7 @@ def main():
     zcost = optimizer.plot_individual_solutions(ax=ax, plot_levelsets=True)
 
     # Plot Pareto front as alphashape
-    zpareto = optimizer.plot_pareto_solutions(ax=ax, resolution=15, alpha=2)
+    zpareto = optimizer.plot_pareto_solutions(ax=ax, resolution=15, alpha=1.5)
 
     # Find pareto centroid and define step-size away from centroid as std
     centroid_pareto = np.mean(zpareto, axis=1, keepdims=True)
@@ -35,7 +39,23 @@ def main():
 
     # Demonstrate IOC with forward loss evaluation
     reference = zcost[:, [0]] + (zcost[:, [0]] - centroid_pareto) * step_size # + [[-1], [-0]] # Use first objective solution as reference, moved-away from centroid by std + manual offset
+    
+    maxent = MaximumEntropyIRL_ParetoSamples_Casadi(optimizer, reference_vector=reference)
+    maxent.solve_inverse(visualize=True, resolution=20)
+    print("CASADI MAXENT DONE \n")
+    print("========================================================================")
 
+    maxent = MaximumEntropyIRL_ParetoSamples_Scipy(optimizer, reference_vector=reference)
+    maxent.solve_inverse(visualize=True, resolution=20)
+    print("SCIPY MAXENT DONE \n")
+    print("========================================================================")
+
+    maxent = MaximumEntropyIRL_withoutParetoSamples(optimizer, reference_vector=reference)
+    theta, z = maxent.solve_inverse(visualize=True)
+    print("NO PARETO SAMPLES MAXENT DONE \n")
+    print("========================================================================")
+
+    
     ioc = InverseOptimalControl(optimizer, reference_vector=reference, distance_metric='l2')
 
     # Compute loss for a test theta
@@ -70,11 +90,15 @@ def main():
     zcost = optimizer.plot_individual_solutions(ax=ax, plot_levelsets=True)
 
     # Plot Pareto front as alphashape
-    zpareto = optimizer.plot_pareto_solutions(ax=ax, resolution=15, alpha=2)
+    zpareto = optimizer.plot_pareto_solutions(ax=ax, resolution=15, alpha=1.5)
 
     # Plot reference and recovered solution
-    ax.plot(reference[0], reference[1], 'g*', markersize=20, label='Reference')
-    ax.plot(optimal_z[0], optimal_z[1], 'b^', markersize=15, label='Recovered (inverse)')
+    if n == 3:
+        ax.plot([reference[0]], [reference[1]], [reference[2]], 'g*', markersize=20, label='Reference')
+        ax.plot([optimal_z[0]], [optimal_z[1]], [optimal_z[2]], 'b^', markersize=15, label='Recovered (inverse)')
+    else:    
+        ax.plot(reference[0], reference[1], 'g*', markersize=20, label='Reference')
+        ax.plot(optimal_z[0], optimal_z[1], 'b^', markersize=15, label='Recovered (inverse)')
 
     ax.set_xlabel('z₁')
     ax.set_ylabel('z₂')
@@ -82,7 +106,7 @@ def main():
     ax.legend()
     ax.grid(True, alpha=0.3)
     plt.show()
-
+    
 
 if __name__ == "__main__":
     main()
