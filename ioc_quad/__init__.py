@@ -8,9 +8,7 @@ from .core import (
     MultiObjectiveOptimizer,
     InverseOptimalControl,
     QuadraticObjective,
-    MaximumEntropyIRL_ParetoSamples_Casadi,
-    MaximumEntropyIRL_ParetoSamples_Scipy, 
-    MaximumEntropyIRL_withoutParetoSamples
+    MaximumEntropyIRL
 )
 
 from .math_utils import (
@@ -22,6 +20,7 @@ from .math_utils import (
     random_quadfun,
     fact,
     choose,
+
 )
 
 from .plot_utils import (

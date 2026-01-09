@@ -6,9 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from ioc_quad import (MultiObjectiveOptimizer, 
                      InverseOptimalControl, 
-                     MaximumEntropyIRL_ParetoSamples_Casadi,
-                     MaximumEntropyIRL_ParetoSamples_Scipy, 
-                     MaximumEntropyIRL_withoutParetoSamples)
+                     MaximumEntropyIRL)
 
 np.random.seed(42)
 
@@ -29,22 +27,10 @@ def main():
 
     # Demonstrate IOC with forward loss evaluation
     reference = zcost[:, [0]] + (zcost[:, [0]] - centroid_cost) * step_size # + [[-1], [-0]] # Use first objective solution as reference, moved-away from centroid by std + manual offset
-    
-    maxent = MaximumEntropyIRL_ParetoSamples_Casadi(optimizer, reference_vector=reference)
-    maxent.solve_inverse(visualize=True, resolution=20)
-    print("CASADI MAXENT DONE \n")
-    print("========================================================================")
 
-    maxent = MaximumEntropyIRL_ParetoSamples_Scipy(optimizer, reference_vector=reference)
-    maxent.solve_inverse(visualize=True, resolution=20)
-    print("SCIPY MAXENT DONE \n")
-    print("========================================================================")
-
-    maxent = MaximumEntropyIRL_withoutParetoSamples(optimizer, reference_vector=reference)
+    maxent = MaximumEntropyIRL(optimizer, reference_vector=reference)
+    print("Solving the inverse optimal control problem Maximum Entropy IRL\n")
     theta, z = maxent.solve_inverse(visualize=True)
-    print("NO PARETO SAMPLES MAXENT DONE \n")
-    print("========================================================================")
-
     
     ioc = InverseOptimalControl(optimizer, reference_vector=reference, distance_metric='l2')
 
