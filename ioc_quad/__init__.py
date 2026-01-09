@@ -8,6 +8,9 @@ from .core import (
     MultiObjectiveOptimizer,
     InverseOptimalControl,
     QuadraticObjective,
+    MaximumEntropyIRL_ParetoSamples_Casadi,
+    MaximumEntropyIRL_ParetoSamples_Scipy, 
+    MaximumEntropyIRL_withoutParetoSamples
 )
 
 from .math_utils import (
