@@ -21,24 +21,14 @@ def main():
     optimizer = MultiObjectiveOptimizer(n_vars=n, n_objectives=m)
     optimizer.generate_random_objectives(rho_range=[4, 10], lambda_range=[0.5, 1.5])
 
-    # Create figure
-    if n == 2:
-        fig, ax = plt.subplots(figsize=(10, 8))
-    if n == 3:
-        fig, ax = plt.subplots(figsize=(10, 8), subplot_kw={"projection":"3d"})
-
-    # Plot individual objective solutions with ellipses
-    zcost = optimizer.plot_individual_solutions(ax=ax, plot_levelsets=True)
-
-    # Plot Pareto front as alphashape
-    zpareto = optimizer.plot_pareto_solutions(ax=ax, resolution=15, alpha=1.5)
+    zcost = optimizer.compute_pareto_solutions(resolution=2)
 
     # Find pareto centroid and define step-size away from centroid as std
-    centroid_pareto = np.mean(zpareto, axis=1, keepdims=True)
-    step_size = np.std(zpareto, axis=1, keepdims=True)
+    centroid_cost = np.mean(zcost, axis=1, keepdims=True)
+    step_size = np.std(zcost - centroid_cost, axis=1, keepdims=True)
 
     # Demonstrate IOC with forward loss evaluation
-    reference = zcost[:, [0]] + (zcost[:, [0]] - centroid_pareto) * step_size # + [[-1], [-0]] # Use first objective solution as reference, moved-away from centroid by std + manual offset
+    reference = zcost[:, [0]] + (zcost[:, [0]] - centroid_cost) * step_size # + [[-1], [-0]] # Use first objective solution as reference, moved-away from centroid by std + manual offset
     
     maxent = MaximumEntropyIRL_ParetoSamples_Casadi(optimizer, reference_vector=reference)
     maxent.solve_inverse(visualize=True, resolution=20)
@@ -90,7 +80,7 @@ def main():
     zcost = optimizer.plot_individual_solutions(ax=ax, plot_levelsets=True)
 
     # Plot Pareto front as alphashape
-    zpareto = optimizer.plot_pareto_solutions(ax=ax, resolution=15, alpha=1.5)
+    zcost = optimizer.plot_pareto_solutions(ax=ax, resolution=15, alpha=1.5)
 
     # Plot reference and recovered solution
     if n == 3:
