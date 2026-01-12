@@ -12,7 +12,7 @@ np.random.seed(42)
 
 def main():
     """Demonstration of forward and inverse optimal control"""
-    n = 3  # Number of decision variables
+    n = 2 # Number of decision variables
     m = 3  # Number of objectives
 
     # Create optimizer and generate random objectives
@@ -28,9 +28,11 @@ def main():
     # Demonstrate IOC with forward loss evaluation
     reference = zcost[:, [0]] + (zcost[:, [0]] - centroid_cost) * step_size 
 
+    reference = optimizer.solve(np.random.dirichlet(np.ones(m)).reshape(-1, 1))
+    
     maxent = MaximumEntropyIRL(optimizer, reference_vector=reference)
     print("Solving the inverse optimal control problem Maximum Entropy IRL\n")
-    theta, z, final_loss, elapsed_time, average_time_per_iter, iterations = maxent.solve_inverse(visualize=True)
+    theta, z, final_loss, elapsed_time, average_time_per_iter, iterations = maxent.solve_inverse(visualize=True, max_iterations=100)
     print(f"Recovered theta: {theta.T}")
     print(f"Recovered z: {z.T}")
     print(f"Final loss: {final_loss:.6f}")
@@ -63,7 +65,6 @@ def main():
     print(f"Forward solution with optimal theta: {z_forward.T}")
     print(f"Difference between inverse z and forward z: {np.linalg.norm(optimal_z - z_forward):.6e}")
 
-    # This is repetitive, needs to be changed that the previous plot is updated instead of creating a new one 
     if n == 2:
         fig, ax = plt.subplots(figsize=(10, 8))
     if n == 3:
@@ -89,7 +90,7 @@ def main():
     ax.legend()
     ax.grid(True, alpha=0.3)
     plt.show()
-    
+
 
 if __name__ == "__main__":
     main()

@@ -601,7 +601,6 @@ class InverseOptimalControl:
         Returns:
             Tuple of (optimal_theta, optimal_z, final_loss)
         """
-        start_time = time.perf_counter()
         if not self.optimizer._initialized:
             raise RuntimeError("Optimizer objectives not set")
         
@@ -668,6 +667,7 @@ class InverseOptimalControl:
 
         # Solve
         try:
+            start_time = time.perf_counter()
             sol = opti.solve()
             end_time = time.perf_counter()
             elapsed_time = end_time - start_time
@@ -988,7 +988,6 @@ class MaximumEntropyIRL:
                      solver_opts: Optional[dict] = None,
                      max_iterations: int = 15,
                      tolerance: float = 1e-4) -> Tuple[np.ndarray, np.ndarray, float, float, float]:
-        start_time = time.perf_counter()
 
         n_obj = self.optimizer.n_objectives
         current_theta = initial_theta if initial_theta is not None else np.ones(n_obj)/n_obj
@@ -1004,8 +1003,8 @@ class MaximumEntropyIRL:
         iterations = 0
         converged = False
 
+        start_time = time.perf_counter()
         for i in range(max_iterations):
-            iter_start_time = time.perf_counter()
             opti = ca.Opti()
             theta = opti.variable(self.optimizer.n_objectives, 1)
 
@@ -1017,7 +1016,8 @@ class MaximumEntropyIRL:
             
             opti.set_initial(theta, current_theta.reshape(-1, 1))
             opti.solver('ipopt', {'ipopt.print_level': 0, 'print_time': 0})
-
+            
+            iter_start_time = time.perf_counter()
             sol = opti.solve()
             current_loss_num = float(sol.value(loss_exp))
             current_theta = sol.value(theta).flatten()
