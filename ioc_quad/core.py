@@ -997,8 +997,11 @@ class MaximumEntropyIRL:
         recorder.hist_theta.append(current_theta.flatten())
         recorder.evaluated_solutions = [self.initial_z.flatten(), self.reference_vector.flatten()]
 
-        for i in range(max_iterations):
+        average_time_per_iter = 0.0
+        elapsed_time = 0.0
 
+        for i in range(max_iterations):
+            iter_start_time = time.perf_counter()
             opti = ca.Opti()
             theta = opti.variable(self.optimizer.n_objectives, 1)
 
@@ -1011,11 +1014,16 @@ class MaximumEntropyIRL:
             opti.set_initial(theta, current_theta.reshape(-1, 1))
             opti.solver('ipopt', {'ipopt.print_level': 0, 'print_time': 0})
 
-            current_loss_num = float(opti.solve().value(loss_exp))
-            current_theta = opti.solve().value(theta).flatten()
+            sol = opti.solve()
+            current_loss_num = float(sol.value(loss_exp))
+            current_theta = sol.value(theta).flatten()
 
             z_new = self.optimizer.solve(current_theta.reshape(-1, 1))
             phi_new = self.optimizer.evaluate_objectives(z_new).flatten()
+
+            iter_end_time = time.perf_counter()
+            average_time_per_iter = ((average_time_per_iter * i) + (iter_end_time - iter_start_time)) / (i + 1)
+            print(f"Iteration {i+1}: Loss = {current_loss_num:.6f}, Theta = {current_theta}, Time = {iter_end_time - iter_start_time:.4f}s")
 
             self.evaluated_solutions.append(z_new.flatten())
             self.evaluated_costs.append(phi_new)
@@ -1028,15 +1036,14 @@ class MaximumEntropyIRL:
 
             if i > 0:
                 diff = np.linalg.norm(z_new.flatten() - recorder.hist_z[-2])
-                if diff < 1e-4:
-                    print(f"Converged at iteration {i}")
-                    
+                if diff < 1e-4:                    
                     end_time = time.perf_counter()
                     elapsed_time = end_time - start_time
+                    
                     break
             
         if visualize:
             viz = IOCVisualizer(self.optimizer, self.reference_vector)
             viz.plot_solver_history(recorder)
 
-        return current_theta, z_new, current_loss_num, elapsed_time
+        return current_theta, z_new, current_loss_num, elapsed_time, average_time_per_iter

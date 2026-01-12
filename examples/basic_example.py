@@ -30,12 +30,13 @@ def main():
 
     maxent = MaximumEntropyIRL(optimizer, reference_vector=reference)
     print("Solving the inverse optimal control problem Maximum Entropy IRL\n")
-    theta, z, final_loss, elapsed_time = maxent.solve_inverse(visualize=True)
+    theta, z, final_loss, elapsed_time, average_time_per_iter = maxent.solve_inverse(visualize=True)
     print(f"Recovered theta: {theta.T}")
     print(f"Recovered z: {z.T}")
     print(f"Final loss: {final_loss:.6f}")
     print(f"Distance to reference: {np.linalg.norm(z - reference):.6f}")
     print(f"Elapsed time: {elapsed_time:.6f} seconds")
+    print(f"Average time per iteration: {average_time_per_iter:.6f} seconds")
     print("=============================================\n")
     ioc = InverseOptimalControl(optimizer, reference_vector=reference, distance_metric='l2')
 
