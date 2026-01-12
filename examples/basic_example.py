@@ -43,12 +43,13 @@ def main():
 
     # Solve inverse problem to find optimal theta
     print("\nSolving inverse optimal control problem...")
-    optimal_theta, optimal_z, final_loss = ioc.solve_inverse(visualize=True, resolution=20)
+    optimal_theta, optimal_z, final_loss, elapsed_time = ioc.solve_inverse(visualize=True, resolution=20)
 
     print(f"Optimal theta: {optimal_theta.T}")
     print(f"Optimal z: {optimal_z.T}")
     print(f"Final loss: {final_loss:.6f}")
     print(f"Distance to reference: {np.linalg.norm(optimal_z - reference):.6f}")
+    print(f"Elapsed time: {elapsed_time:.6f} seconds")
 
     
     # Verify: solve forward problem with optimal theta

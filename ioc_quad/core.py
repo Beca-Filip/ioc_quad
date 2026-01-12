@@ -1,5 +1,6 @@
 import numpy as np
 import casadi as ca
+import time
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
 from matplotlib.widgets import Slider
@@ -600,6 +601,7 @@ class InverseOptimalControl:
         Returns:
             Tuple of (optimal_theta, optimal_z, final_loss)
         """
+        start_time = time.perf_counter()
         if not self.optimizer._initialized:
             raise RuntimeError("Optimizer objectives not set")
         
@@ -668,6 +670,9 @@ class InverseOptimalControl:
         try:
             sol = opti.solve()
             recorder(0)
+            end_time = time.perf_counter()
+            elapsed_time = end_time - start_time
+
             if visualize and len(recorder.hist_z) > 0:
                 Visualizer.plot_solver_history(recorder)
 
@@ -675,7 +680,7 @@ class InverseOptimalControl:
             optimal_z = np.array(sol.value(z)).reshape(self.optimizer.n_vars, 1)
             final_loss = float(sol.value(cost))
 
-            return optimal_theta, optimal_z, final_loss
+            return optimal_theta, optimal_z, final_loss, elapsed_time
         except RuntimeError as e:
             if visualize: 
                 plt.show() # Show what happened before crash
