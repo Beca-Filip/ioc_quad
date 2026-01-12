@@ -26,12 +26,17 @@ def main():
     step_size = np.std(zcost - centroid_cost, axis=1, keepdims=True)
 
     # Demonstrate IOC with forward loss evaluation
-    reference = zcost[:, [0]] + (zcost[:, [0]] - centroid_cost) * step_size # + [[-1], [-0]] # Use first objective solution as reference, moved-away from centroid by std + manual offset
+    reference = zcost[:, [0]] + (zcost[:, [0]] - centroid_cost) * step_size 
 
     maxent = MaximumEntropyIRL(optimizer, reference_vector=reference)
     print("Solving the inverse optimal control problem Maximum Entropy IRL\n")
-    theta, z = maxent.solve_inverse(visualize=True)
-    
+    theta, z, final_loss, elapsed_time = maxent.solve_inverse(visualize=True)
+    print(f"Recovered theta: {theta.T}")
+    print(f"Recovered z: {z.T}")
+    print(f"Final loss: {final_loss:.6f}")
+    print(f"Distance to reference: {np.linalg.norm(z - reference):.6f}")
+    print(f"Elapsed time: {elapsed_time:.6f} seconds")
+    print("=============================================\n")
     ioc = InverseOptimalControl(optimizer, reference_vector=reference, distance_metric='l2')
 
     # Compute loss for a test theta

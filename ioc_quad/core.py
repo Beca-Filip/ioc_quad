@@ -583,7 +583,7 @@ class InverseOptimalControl:
                      initial_z: Optional[np.ndarray] = None,
                      solver_opts: Optional[dict] = None,
                      visualize: bool = False,
-                     resolution: int = 15) -> Tuple[np.ndarray, np.ndarray, float]:
+                     resolution: int = 15) -> Tuple[np.ndarray, np.ndarray, float, float]:
         """
         Solve the inverse optimal control problem by simultaneously optimizing for z and theta.
 
@@ -738,7 +738,6 @@ class IOCVisualizer:
             self.pareto_phi = pareto_phi
         else:
             self.pareto_z, self.pareto_phi = self.optimizer.compute_pareto_both_spaces(resolution)
-
 
     def _draw_alphashape(self, ax, points, n_vars, alpha=1.5, color='blue', p_alpha=0.15):
         import alphashape
@@ -896,10 +895,10 @@ class IOCVisualizer:
             all_evals = np.vstack(recorder.evaluated_solutions)
             
             if n_vars == 3:
-                scat_eval = ax_z.scatter([], [], [], c='yellow', marker='x', s=40, 
+                scat_eval = ax_z.scatter([], [], [], c='black', marker='x', s=40, 
                                     label='Evaluated Solutions', zorder=5)
             else:
-                scat_eval = ax_z.scatter([], [], c='yellow', marker='x', s=40, 
+                scat_eval = ax_z.scatter([], [], c='black', marker='x', s=40, 
                                     label='Evaluated Solutions', zorder=5)
         ax_z.legend(loc='upper left', fontsize='small')
 
@@ -971,8 +970,7 @@ class MaximumEntropyIRL:
             self.evaluated_costs = [self.initial_phi, self.phi_ref]
         else:
             print("Warning: No reference vector provided for IOC.")
-
-        
+      
     def ioc_loss(self, theta : ca.MX) -> ca.MX:
         """Computes the MaxEnt loss using the current pool of evaluated costs."""
         weighted_costs = ca.mtimes(theta.T, np.array(self.evaluated_costs).T)
@@ -987,8 +985,9 @@ class MaximumEntropyIRL:
                      initial_theta: Optional[np.ndarray] = None,
                      visualize: bool = False,
                      solver_opts: Optional[dict] = None,
-                     max_iterations: int = 20) -> Tuple[np.ndarray, np.ndarray, list]:
-        
+                     max_iterations: int = 20) -> Tuple[np.ndarray, np.ndarray, float, float]:
+        start_time = time.perf_counter()
+
         n_obj = self.optimizer.n_objectives
         current_theta = initial_theta if initial_theta is not None else np.ones(n_obj)/n_obj
 
@@ -1003,14 +1002,16 @@ class MaximumEntropyIRL:
             opti = ca.Opti()
             theta = opti.variable(self.optimizer.n_objectives, 1)
 
-            loss = self.ioc_loss(theta)
+            loss_exp = self.ioc_loss(theta)
             
-            opti.minimize(loss)
+            opti.minimize(loss_exp)
             opti.subject_to(ca.sum1(theta) == 1.0)
             opti.subject_to(theta >= 1e-4)
             
             opti.set_initial(theta, current_theta.reshape(-1, 1))
             opti.solver('ipopt', {'ipopt.print_level': 0, 'print_time': 0})
+
+            current_loss_num = float(opti.solve().value(loss_exp))
             current_theta = opti.solve().value(theta).flatten()
 
             z_new = self.optimizer.solve(current_theta.reshape(-1, 1))
@@ -1024,17 +1025,18 @@ class MaximumEntropyIRL:
             recorder.hist_phi.append(phi_new)
             recorder.evaluated_solutions.append(z_new.flatten())
 
+
             if i > 0:
                 diff = np.linalg.norm(z_new.flatten() - recorder.hist_z[-2])
                 if diff < 1e-4:
                     print(f"Converged at iteration {i}")
+                    
+                    end_time = time.perf_counter()
+                    elapsed_time = end_time - start_time
                     break
             
-            print(f"Iteration {i}: Loss calculated over {len(self.evaluated_costs)-1} samples.")
-
-
         if visualize:
             viz = IOCVisualizer(self.optimizer, self.reference_vector)
             viz.plot_solver_history(recorder)
 
-        return current_theta, z_new
+        return current_theta, z_new, current_loss_num, elapsed_time
