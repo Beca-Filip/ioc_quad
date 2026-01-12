@@ -951,8 +951,8 @@ class MaximumEntropyIRL:
                  optimizer : MultiObjectiveOptimizer = None,
                  reference_vector : np.ndarray = None, 
                  initial_theta: Optional[np.ndarray] = None, 
-                 resolution: int = 20):
-        
+                 resolution: int = 20
+                 ):
         self.optimizer = optimizer
         self.reference_vector = reference_vector
         if initial_theta is None:
@@ -986,7 +986,8 @@ class MaximumEntropyIRL:
                      initial_theta: Optional[np.ndarray] = None,
                      visualize: bool = False,
                      solver_opts: Optional[dict] = None,
-                     max_iterations: int = 15) -> Tuple[np.ndarray, np.ndarray, float, float, float]:
+                     max_iterations: int = 15,
+                     tolerance: float = 1e-4) -> Tuple[np.ndarray, np.ndarray, float, float, float]:
         start_time = time.perf_counter()
 
         n_obj = self.optimizer.n_objectives
@@ -1038,7 +1039,7 @@ class MaximumEntropyIRL:
 
             if i > 0:
                 diff = np.linalg.norm(z_new.flatten() - recorder.hist_z[-2])
-                if diff < 1e-4:                    
+                if diff < tolerance:                    
                     end_time = time.perf_counter()
                     elapsed_time = end_time - start_time
                     iterations = i + 1
