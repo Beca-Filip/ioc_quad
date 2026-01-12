@@ -12,8 +12,8 @@ np.random.seed(42)
 
 def main():
     """Demonstration of forward and inverse optimal control"""
-    n = 3  # Number of decision variables
-    m = 4  # Number of objectives
+    n = 2  # Number of decision variables
+    m = 3  # Number of objectives
 
     # Create optimizer and generate random objectives
     optimizer = MultiObjectiveOptimizer(n_vars=n, n_objectives=m)
@@ -30,7 +30,7 @@ def main():
 
     maxent = MaximumEntropyIRL(optimizer, reference_vector=reference)
     print("Solving the inverse optimal control problem Maximum Entropy IRL\n")
-    theta, z, final_loss, elapsed_time, average_time_per_iter = maxent.solve_inverse(visualize=True)
+    theta, z, final_loss, elapsed_time, average_time_per_iter, iterations = maxent.solve_inverse(visualize=True)
     print(f"Recovered theta: {theta.T}")
     print(f"Recovered z: {z.T}")
     print(f"Final loss: {final_loss:.6f}")
@@ -49,7 +49,7 @@ def main():
 
     # Solve inverse problem to find optimal theta
     print("\nSolving inverse optimal control problem...")
-    optimal_theta, optimal_z, final_loss, elapsed_time = ioc.solve_inverse(visualize=True, resolution=20)
+    optimal_theta, optimal_z, final_loss, elapsed_time, iterations = ioc.solve_inverse(visualize=True, resolution=20)
 
     print(f"Optimal theta: {optimal_theta.T}")
     print(f"Optimal z: {optimal_z.T}")

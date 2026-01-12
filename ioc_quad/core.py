@@ -583,7 +583,7 @@ class InverseOptimalControl:
                      initial_z: Optional[np.ndarray] = None,
                      solver_opts: Optional[dict] = None,
                      visualize: bool = False,
-                     resolution: int = 15) -> Tuple[np.ndarray, np.ndarray, float, float]:
+                     resolution: int = 15) -> Tuple[np.ndarray, np.ndarray, float, float, float]:
         """
         Solve the inverse optimal control problem by simultaneously optimizing for z and theta.
 
@@ -669,7 +669,6 @@ class InverseOptimalControl:
         # Solve
         try:
             sol = opti.solve()
-            recorder(0)
             end_time = time.perf_counter()
             elapsed_time = end_time - start_time
 
@@ -680,7 +679,9 @@ class InverseOptimalControl:
             optimal_z = np.array(sol.value(z)).reshape(self.optimizer.n_vars, 1)
             final_loss = float(sol.value(cost))
 
-            return optimal_theta, optimal_z, final_loss, elapsed_time
+            iterations = sol.stats()['iter_count']
+
+            return optimal_theta, optimal_z, final_loss, elapsed_time, iterations
         except RuntimeError as e:
             if visualize: 
                 plt.show() # Show what happened before crash
@@ -985,7 +986,7 @@ class MaximumEntropyIRL:
                      initial_theta: Optional[np.ndarray] = None,
                      visualize: bool = False,
                      solver_opts: Optional[dict] = None,
-                     max_iterations: int = 20) -> Tuple[np.ndarray, np.ndarray, float, float]:
+                     max_iterations: int = 15) -> Tuple[np.ndarray, np.ndarray, float, float, float]:
         start_time = time.perf_counter()
 
         n_obj = self.optimizer.n_objectives
@@ -999,6 +1000,8 @@ class MaximumEntropyIRL:
 
         average_time_per_iter = 0.0
         elapsed_time = 0.0
+        iterations = 0
+        converged = False
 
         for i in range(max_iterations):
             iter_start_time = time.perf_counter()
@@ -1033,17 +1036,22 @@ class MaximumEntropyIRL:
             recorder.hist_phi.append(phi_new)
             recorder.evaluated_solutions.append(z_new.flatten())
 
-
             if i > 0:
                 diff = np.linalg.norm(z_new.flatten() - recorder.hist_z[-2])
                 if diff < 1e-4:                    
                     end_time = time.perf_counter()
                     elapsed_time = end_time - start_time
-                    
+                    iterations = i + 1
+                    converged = True
                     break
-            
+
+        if not converged:           
+            iterations = max_iterations
+            end_time = time.perf_counter()
+            elapsed_time = end_time - start_time
+                    
         if visualize:
             viz = IOCVisualizer(self.optimizer, self.reference_vector)
             viz.plot_solver_history(recorder)
 
-        return current_theta, z_new, current_loss_num, elapsed_time, average_time_per_iter
+        return current_theta, z_new, current_loss_num, elapsed_time, average_time_per_iter, iterations
