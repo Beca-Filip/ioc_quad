@@ -2,7 +2,6 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import Optional, List
 from .math_utils import matrix_sqrt
 
 
@@ -76,3 +75,4 @@ def plot_ellipsoid(M, c, ax=None, numpts=25, **kwargs):
     ax.plot_surface(X, Y, Z, **kwargs)
 
     return ax
+

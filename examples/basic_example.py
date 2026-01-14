@@ -6,16 +6,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 from ioc_quad import (MultiObjectiveOptimizer, 
                      InverseOptimalControl, 
-                     MaximumEntropyIRL_ParetoSamples_Casadi,
-                     MaximumEntropyIRL_ParetoSamples_Scipy, 
-                     MaximumEntropyIRL_withoutParetoSamples)
+                     MaximumEntropyIRL)
 
 np.random.seed(42)
 
 def main():
     """Demonstration of forward and inverse optimal control"""
-    n = 3  # Number of decision variables
-    m = 4  # Number of objectives
+    n = 2 # Number of decision variables
+    m = 3  # Number of objectives
 
     # Create optimizer and generate random objectives
     optimizer = MultiObjectiveOptimizer(n_vars=n, n_objectives=m)
@@ -28,24 +26,20 @@ def main():
     step_size = np.std(zcost - centroid_cost, axis=1, keepdims=True)
 
     # Demonstrate IOC with forward loss evaluation
-    reference = zcost[:, [0]] + (zcost[:, [0]] - centroid_cost) * step_size # + [[-1], [-0]] # Use first objective solution as reference, moved-away from centroid by std + manual offset
+    reference = zcost[:, [0]] + (zcost[:, [0]] - centroid_cost) * step_size 
+
+    reference = optimizer.solve(np.random.dirichlet(np.ones(m)).reshape(-1, 1))
     
-    maxent = MaximumEntropyIRL_ParetoSamples_Casadi(optimizer, reference_vector=reference)
-    maxent.solve_inverse(visualize=True, resolution=20)
-    print("CASADI MAXENT DONE \n")
-    print("========================================================================")
-
-    maxent = MaximumEntropyIRL_ParetoSamples_Scipy(optimizer, reference_vector=reference)
-    maxent.solve_inverse(visualize=True, resolution=20)
-    print("SCIPY MAXENT DONE \n")
-    print("========================================================================")
-
-    maxent = MaximumEntropyIRL_withoutParetoSamples(optimizer, reference_vector=reference)
-    theta, z = maxent.solve_inverse(visualize=True)
-    print("NO PARETO SAMPLES MAXENT DONE \n")
-    print("========================================================================")
-
-    
+    maxent = MaximumEntropyIRL(optimizer, reference_vector=reference)
+    print("Solving the inverse optimal control problem Maximum Entropy IRL\n")
+    theta, z, final_loss, elapsed_time, average_time_per_iter, iterations = maxent.solve_inverse(visualize=True, max_iterations=100)
+    print(f"Recovered theta: {theta.T}")
+    print(f"Recovered z: {z.T}")
+    print(f"Final loss: {final_loss:.6f}")
+    print(f"Distance to reference: {np.linalg.norm(z - reference):.6f}")
+    print(f"Elapsed time: {elapsed_time:.6f} seconds")
+    print(f"Average time per iteration: {average_time_per_iter:.6f} seconds")
+    print("=============================================\n")
     ioc = InverseOptimalControl(optimizer, reference_vector=reference, distance_metric='l2')
 
     # Compute loss for a test theta
@@ -57,12 +51,13 @@ def main():
 
     # Solve inverse problem to find optimal theta
     print("\nSolving inverse optimal control problem...")
-    optimal_theta, optimal_z, final_loss = ioc.solve_inverse(visualize=True, resolution=20)
+    optimal_theta, optimal_z, final_loss, elapsed_time, iterations = ioc.solve_inverse(visualize=True, resolution=20)
 
     print(f"Optimal theta: {optimal_theta.T}")
     print(f"Optimal z: {optimal_z.T}")
     print(f"Final loss: {final_loss:.6f}")
     print(f"Distance to reference: {np.linalg.norm(optimal_z - reference):.6f}")
+    print(f"Elapsed time: {elapsed_time:.6f} seconds")
 
     
     # Verify: solve forward problem with optimal theta
@@ -70,7 +65,6 @@ def main():
     print(f"Forward solution with optimal theta: {z_forward.T}")
     print(f"Difference between inverse z and forward z: {np.linalg.norm(optimal_z - z_forward):.6e}")
 
-    # This is repetitive, needs to be changed that the previous plot is updated instead of creating a new one 
     if n == 2:
         fig, ax = plt.subplots(figsize=(10, 8))
     if n == 3:
@@ -96,7 +90,7 @@ def main():
     ax.legend()
     ax.grid(True, alpha=0.3)
     plt.show()
-    
+
 
 if __name__ == "__main__":
     main()
