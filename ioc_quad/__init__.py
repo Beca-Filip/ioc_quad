@@ -18,8 +18,6 @@ from .math_utils import (
     random_psd,
     random_shell,
     random_quadfun,
-    fact,
-    choose,
 
 )
 
@@ -42,8 +40,6 @@ __all__ = [
     "random_psd",
     "random_shell",
     "random_quadfun",
-    "fact",
-    "choose",
     # Plot utilities
     "plot_ellipse",
     "plot_ellipsoid",
