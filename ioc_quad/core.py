@@ -37,9 +37,9 @@ class QuadraticObjective:
         except np.linalg.LinAlgError:
             return False
 
-    def evaluate(self, z: np.ndarray) -> float:
+    def evaluate(self, z: np.ndarray | ca.MX) -> float | ca.MX:
         """Evaluate the objective at point z"""
-        return float(0.5 * z.T @ self.Q @ z + self.p.T @ z)
+        return (z.T @ self.Q @ z / 2 + self.p.T @ z)
 
 class MultiObjectiveOptimizer:
     """
@@ -101,8 +101,7 @@ class MultiObjectiveOptimizer:
 
         # Build the weighted sum of objectives
         costvec = ca.vertcat(*[
-            (self._z.T @ obj.Q @ self._z / 2 + obj.p.T @ self._z)
-            for obj in self.objectives
+            obj.evaluate(self._z) for obj in self.objectives
         ])
         self._cost = ca.sum1(self._theta * costvec)
         self._opti.minimize(self._cost)
