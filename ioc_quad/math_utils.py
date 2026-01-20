@@ -1,10 +1,10 @@
 """Mathematical utility functions for IOC quadratic optimization."""
 
 import numpy as np
-from typing import List
+from typing import List, Tuple
 
 
-def simplex_grid(m, r):
+def simplex_grid(m : int, r : int) -> List[np.ndarray]:
     """
     Generate a uniform grid of points on the (m-1)-dimensional probability simplex.
 
@@ -45,7 +45,7 @@ def simplex_grid(m, r):
     return grid
 
 
-def simplex_grid_rec(d, m, r, j, sigma, grid):
+def simplex_grid_rec(d : int, m : int, r : int, j : np.ndarray, sigma : int, grid : List[np.ndarray]) -> List[np.ndarray]:
     """
     Recursive helper function for generating simplex grid points.
 
@@ -87,7 +87,7 @@ def simplex_grid_rec(d, m, r, j, sigma, grid):
     return grid
 
 
-def matrix_sqrt(M):
+def matrix_sqrt(M : np.ndarray) -> np.ndarray:
     """
     Compute the matrix square root using SVD.
 
@@ -106,7 +106,7 @@ def matrix_sqrt(M):
     return sqrtM
 
 
-def random_psd(n, n_samples, lambda_range=[0.5, 2]):
+def random_psd(n : int, n_samples : int, lambda_range : List[float] = [0.5, 2]) -> List[np.ndarray]:
     """
     Generate random symmetric positive-definite matrices.
 
@@ -143,7 +143,7 @@ def random_psd(n, n_samples, lambda_range=[0.5, 2]):
     return list(Q)
 
 
-def random_shell(n, n_samples, rho_range=[1, 2]):
+def random_shell(n : int, n_samples : int, rho_range : List[float] = [1., 2.]) -> np.ndarray:
     """
     Sample points uniformly from an n-dimensional spherical shell.
 
@@ -187,7 +187,7 @@ def random_shell(n, n_samples, rho_range=[1, 2]):
     return x_star
 
 
-def random_quadfun(n, n_samples, rho_range=[1, 2], lambda_range=[0.5, 1.5]):
+def random_quadfun(n : int, n_samples : int, rho_range : List[float] = [1., 2.], lambda_range : List[float] = [0.5, 1.5]) -> Tuple[List[np.ndarray], List[np.ndarray]]:
     """
     Sample quadratic functions with PSD Hessian matrices and random optima.
 
