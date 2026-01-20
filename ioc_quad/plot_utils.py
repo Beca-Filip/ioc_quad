@@ -28,6 +28,7 @@ def plot_ellipse(M, c, ax=None, numpts=50, **kwargs):
     ellipse = c + sqrtM @ circle
     if ax:
         ax.plot(ellipse[0, :], ellipse[1, :], **kwargs)
+        return    
     plt.plot(ellipse[0, :], ellipse[1, :], **kwargs)
 
 
