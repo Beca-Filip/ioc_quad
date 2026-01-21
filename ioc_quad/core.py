@@ -12,6 +12,7 @@ from scipy.optimize import minimize
 
 from .math_utils import simplex_grid, random_quadfun
 from .plot_utils import plot_ellipse, plot_ellipsoid
+
 @dataclass
 class QuadraticObjective:
     """
@@ -40,6 +41,35 @@ class QuadraticObjective:
     def evaluate(self, z: np.ndarray | ca.MX) -> float | ca.MX:
         """Evaluate the objective at point z"""
         return (z.T @ self.Q @ z / 2 + self.p.T @ z)
+
+
+@dataclass
+class LinearEqualityConstraint:
+    """
+    Represents a single linear equality constraint: h(z) = a^T z - b
+    """
+    a: np.ndarray # Constraint gradient vector (n x 1)
+    b: float | np.float64 # Constraint affine trem
+
+    def __post_init__(self):
+        """Validate the constraint parameters""" 
+        if not isinstance(self.a, np.ndarray) or not np.ndim(self.a) != 2 or self.a.shape[1] != 1:
+            raise ValueError("a must be a NumPy column vector.")
+        if not isinstance(self.b, float) or not isinstance(self.b, np.float64):
+            raise ValueError("b must be a float or NumPy float.")
+        
+        self._normalize()
+    
+    def _normalize(self, tolerance: float = 1e-6):
+        norm_a = np.linalg.norm(self.a)
+        if norm_a < tolerance:
+            raise ValueError(f"a must have norm superior to f{tolerance}.")
+        self.a /= norm_a
+        self.b /= norm_a
+
+    def evaluate(self, z: np.ndarray | ca.MX) -> float | ca.MX:
+        return (self.a.T @ z + self.b)
+
 
 class MultiObjectiveOptimizer:
     """
