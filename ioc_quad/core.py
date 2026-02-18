@@ -49,7 +49,7 @@ class LinearEqualityConstraint:
     Represents a single linear equality constraint: h(z) = a^T z - b
     """
     a: np.ndarray # Constraint gradient vector (n x 1)
-    b: float | np.float64 # Constraint affine trem
+    b: float | np.float64 # Constraint affine term
 
     def __post_init__(self):
         """Validate the constraint parameters""" 
@@ -68,7 +68,7 @@ class LinearEqualityConstraint:
         self.b /= norm_a
 
     def evaluate(self, z: np.ndarray | ca.MX) -> float | ca.MX:
-        return (self.a.T @ z + self.b)
+        return (self.a.T @ z - self.b)
 
 
 class MultiObjectiveOptimizer:
