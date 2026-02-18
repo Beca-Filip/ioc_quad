@@ -77,7 +77,7 @@ def simplex_grid_rec(d : int, m : int, r : int, j : np.ndarray, sigma : int, gri
     """
     if d >= m - 1:
         j[d] = (r-1) - sigma
-        grid.append(j / (r-1))
+        grid.append(j.copy() / (r-1))
         return grid
 
     for i in range(r - sigma):
